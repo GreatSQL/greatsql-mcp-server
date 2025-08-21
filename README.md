@@ -51,6 +51,18 @@ mysql: [Warning] Using a password on the command line interface can be insecure.
 +-----------+
 ```
 
+连接GreatSQL服务器，新建 *mcp* 数据库，并创建MCP服务专用账户以及授予相应的权限
+
+```sql
+greatsql> CREATE DATABASE mcp;
+greatsql> CREATE USER mcp IDENTIFIED WITH mysql_native_password by 'MCP-Server@GreatSQL';
+greatsql> GRANT SELECT ON *.* TO mcp;
+greatsql> GRANT PROCESSLIST ON *.* TO mcp;
+greatsql> GRANT ALL ON mcp.* TO mcp;
+```
+
+> 这里注意创建 mcp 账户时要指定 *mysql_native_password*，因为还不支持默认的 *caching_sha2_password*。
+
 ### 2、准备Java环境
 
 安装并配置 JDK 21 和 Maven 3.6+ 环境。
@@ -76,9 +88,34 @@ java version "21.0.1" 2023-10-17
 Java(TM) SE Runtime Environment ...
 ```
 
+如果是Linux环境，可以下载二进制包 *jdk-21_linux-x64_bin.tar.gz*，解压缩到 */usr/local* 目录下
+
+```bash
+$ cd /tmp/
+$ wget -c "https://download.oracle.com/java/21/latest/jdk-21_linux-x64_bin.tar.gz"
+$ tar xf jdk-21_linux-x64_bin.tar.gz -C /usr/local
+$ ls /usr/local/jdk-21.0.8/
+bin  conf  include  jmods  legal  lib  LICENSE  man  README  release
+$ /usr/local/jdk-21.0.8/bin/java -version
+java version "21.0.8" 2025-07-15 LTS
+Java(TM) SE Runtime Environment (build 21.0.8+12-LTS-250)
+Java HotSpot(TM) 64-Bit Server VM (build 21.0.8+12-LTS-250, mixed mode, sharing)
+```
+
+修改相关环境变量 **PATH** 和 **JAVA_HOME**
+
+```bash
+$ echo 'export PATH=/usr/local/jdk-21.0.8/bin/:$PATH' >> ~/.bash_profile
+$ echo 'export JAVA_HOME=/usr/local/jdk-21.0.8' >> ~/.bash_profile
+$ source ~/.bash_profile
+$ java -version
+java version "21.0.8" 2025-07-15 LTS
+...
+```
+
 #### 2.2、安装Maven 3.6+ 
 
-打开 [Maven 官方下载链接](https://maven.apache.org/download.cgi) 下载Maven安装包。
+打以Windows客户端环境为例，开 [Maven 官方下载链接](https://maven.apache.org/download.cgi) 下载Maven安装包。
 
 解压到任意目录，例如 `C:\apache-maven-3.9.6`。
 
@@ -91,6 +128,29 @@ mvn -v
 ```
 
 显示相应的Maven版本信息即安装成功。
+
+如果是Linux环境，可以下载二进制包 *apache-maven-3.9.11-bin.tar.gz*，解压缩到 */usr/local* 目录下
+
+```bash
+$ cd /tmp
+$ wget -c "https://dlcdn.apache.org/maven/maven-3/3.9.11/binaries/apache-maven-3.9.11-bin.tar.gz"
+$ tar xf apache-maven-3.9.11-bin.tar.gz -C /usr/local
+$ ls /usr/local/apache-maven-3.9.11/
+bin  boot  conf  lib  LICENSE  NOTICE  README.txt
+$ /usr/local/apache-maven-3.9.11/bin/mvn -version
+Apache Maven 3.9.11 (3e54c93a704957b63ee3494413a2b544fd3d825b)
+...
+```
+
+修改相关环境变量 **PATH**
+
+```bash
+$ echo 'export PATH=/usr/local/apache-maven-3.9.11/bin/:$PATH' >> ~/.bash_profile
+$ source ~/.bash_profile
+$ mvn -version
+Apache Maven 3.9.11 (3e54c93a704957b63ee3494413a2b544fd3d825b)
+...
+```
 
 ## MCP服务搭建
 
@@ -106,9 +166,13 @@ $ git clone https://gitee.com/GreatSQL/greatsql-mcp-server.git
 
 ```ini
 greatsql.url=jdbc:mysql://127.0.0.1:3306
-greatsql.user=root
-greatsql.password="MCP-Server@GreatSQL"
+greatsql.user=mcp
+greatsql.password=MCP-Server@GreatSQL
 ```
+
+> 这里设置为上面新创建的专用账户名和密码。
+>
+> 注意：密码不要用括号引用起来。
 
 用户可以根据实际的GreatSQL数据库地址, 修改上面的配置文件。
 
@@ -118,7 +182,9 @@ greatsql.password="MCP-Server@GreatSQL"
 ```bash
 $ mvn clean package -DskipTests
 ```
-打包成功后会在 target 目录下生成 greatSqlMcp-0.0.1-SNAPSHOT.jar 文件。
+打包成功后会在 *target* 目录下生成 *greatsql-mcp-server-0.0.1-SNAPSHOT.jar* 文件。
+
+> 第一次打包可能耗时数分钟，请耐心等待。
 
 ### 4、配置MCP服务
 
@@ -130,22 +196,19 @@ chatbox安装：
 
 安装完成后，打开配置MCP服务器。
 
-有两种方式：
+支持 **本地** 和 **远程** 两种方式接入MCP服务。
 
-1. 本地配置
-2. 远程配置
-
-#### 4.1、本地配置
+#### 4.1、本地接入
 
 在chatbox中添加本地MCP服务器：
 
-命令为java -jar /path/to/greatsql-mcp-server-0.0.1-SNAPSHOT.jar
+命令为 `java -jar /path/to/greatsql-mcp-server-0.0.1-SNAPSHOT.jar`。
 
 ![配置MCP服务](./docs/images/配置mcp服务.png)
 
-#### 4.2、远程配置
+#### 4.2、远程接入
 
-可在`src/main/resources/application.properties` 文件里修改服务的相关配置：
+编辑文件 `src/main/resources/application.properties`，修改MCP Server相关配置
 
 ```
 # 服务端口配置
@@ -155,26 +218,15 @@ server.port=8080
 mcp.auth.enabled=true
 mcp.auth.api-key=7355608
 ```
+> 可根据需要自定定义 port 和 api-key 的参数值。
 
-根据上面配置, MCP对应的服务地址和认证信息如下，用于在chatbox的MCP Server配置框进行填写：
-
-URL为：
-```
-http://<server-ip>:8080/mcp
-```
-
-HTTP Header为：
-```
-Authorization=Bearer 7355608
-```
-
-启动MCP Server
+修改完配置参数后，启动MCP Server
 ```bash
-cd target
-java -jar greatsql-mcp-server-0.0.1-SNAPSHOT.jar
+$ cd target
+$ java -jar greatsql-mcp-server-0.0.1-SNAPSHOT.jar
 ```
 
-启动成功显示如下信息：
+启动成功显示如下信息
 ```
 2025-07-30 10:37:36 [main] INFO  o.s.a.m.s.a.McpServerAutoConfiguration - Registered tools: 7, notification: true
 2025-07-30 10:37:36 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
@@ -182,9 +234,15 @@ java -jar greatsql-mcp-server-0.0.1-SNAPSHOT.jar
 2025-07-30 10:37:36 [main] INFO  o.g.g.GreatSqlMcpApplication - Started GreatSqlMcpApplication in 1.122 seconds (process running for 1.457)
 ```
 
+根据上面配置, MCP对应的服务地址和认证信息如下，用于在chatbox的MCP Server配置框进行填写。
+
+URL处填写 `http://<server-ip>:8080/mcp`，如 `http://127.0.0.1:8080/mcp`。
+
+HTTP Header处填写 *api-key* 参数，如：`Authorization=Bearer 7355608`。
+
 ![远程配置MCP服务](./docs/images/远程配置.png)
 
-### 5、启动MCP服务
+### 5、连接MCP服务
 
 点击测试后 可以看到该服务提供的工具：
 
