@@ -273,4 +273,50 @@ public class DatabaseService {
         }
     }
 
+    @Tool(name = "createDB", description = "创建新数据库")
+    public boolean createDB(
+            @ToolParam(description = "数据库名称") String databaseName) {
+        String sql = "CREATE DATABASE " + databaseName;
+
+        try (Connection conn = connectionService.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.executeUpdate();
+            return true;
+        } catch (SQLException e) {
+            throw new RuntimeException("创建数据库时出错：" + e.getMessage(), e);
+        }
+    }
+
+    @Tool(name = "checkCriticalTransactions", description = "检查当前是否有活跃的大事务或长事务")
+    public List<Map<String, Object>> checkCriticalTransactions() {
+        List<Map<String, Object>> results = new ArrayList<>();
+        String sql = "SELECT * FROM information_schema.INNODB_TRX WHERE " +
+                "trx_lock_structs >= 5 OR " +
+                "trx_rows_locked >= 100 OR " +
+                "trx_rows_modified >= 100 OR " +
+                "TIME_TO_SEC(TIMEDIFF(NOW(),trx_started)) > 100";
+
+        try (Connection conn = connectionService.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            int columnCount = rs.getMetaData().getColumnCount();
+
+            while (rs.next()) {
+                Map<String, Object> row = new HashMap<>();
+                for (int i = 1; i <= columnCount; i++) {
+                    String columnName = rs.getMetaData().getColumnName(i);
+                    Object value = rs.getObject(i);
+                    row.put(columnName, value);
+                }
+                results.add(row);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("查询需要关注的事务时出错：" + e.getMessage(), e);
+        }
+
+        return results;
+    }
+
 }

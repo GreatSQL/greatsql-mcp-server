@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.*;
 import org.greatsql.greatsqlmcp.config.AuthConfig;
 import org.springframework.http.HttpStatus;
 import java.util.Map;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import jakarta.annotation.PostConstruct;
 
 @RestController
 @CrossOrigin(origins = "*")
@@ -17,6 +19,11 @@ public class McpController {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @PostConstruct
+    public void init() {
+        objectMapper.registerModule(new JavaTimeModule());
+    }
 
     @Autowired
     private AuthConfig authConfig;
@@ -242,6 +249,29 @@ public class McpController {
                                         ),
                                         "required", new String[]{"database", "tableName", "whereClause"}
                                 )
+                        ),
+                        Map.of(
+                                "name", "createDB",
+                                "description", "创建新数据库",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(
+                                                "databaseName", Map.of(
+                                                        "type", "string",
+                                                        "description", "数据库名称"
+                                                )
+                                        ),
+                                        "required", new String[]{"databaseName"}
+                                )
+                        ),
+                        Map.of(
+                                "name", "checkCriticalTransactions",
+                                "description", "检查当前是否有活跃的大事务或长事务",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
                         )
                 }
         );
@@ -314,6 +344,16 @@ public class McpController {
                     yield Map.of("error", "所有参数都不能为空");
                 }
                 yield databaseService.deleteData(database, tableName, whereClause);
+            }
+            case "createDB" -> {
+                String databaseName = (String) arguments.get("databaseName");
+                if (databaseName == null) {
+                    yield Map.of("error", "数据库名称不能为空");
+                }
+                yield databaseService.createDB(databaseName);
+            }
+            case "checkCriticalTransactions" -> {
+                yield databaseService.checkCriticalTransactions();
             }
             default -> Map.of("error", "未知的工具: " + name);
         };
