@@ -309,28 +309,138 @@ HTTP Header处填写 *api-key* 参数，如：`Authorization=Bearer 7355608`。
 
 ### 克隆代码
 
-```
-git clone https://gitee.com/GreatSQL/greatsql-mcp-server.git
+```bash
+$ git clone https://gitee.com/GreatSQL/greatsql-mcp-server.git
 ```
 
 ### 创建分支
 
 建议在本地新建分支进行开发：
 
-```
-git checkout -b feature/your-feature-name
+```bash
+$ git checkout -b feature/your-feature-name
 ```
 
 ### 开发与测试
 
-按需修改代码
+按需修改代码，以增加创建数据库功能为例，相关代码演示如下（以 `git diff` 方式展示）
+
+```bash
+$ git diff
+
+diff --git a/src/main/java/org/greatsql/greatsqlmcp/controller/McpController.java b/src/main/java/org/greatsql/greatsqlmcp/controller/McpController.java
+index ea20c48..c89a38e 100644
+--- a/src/main/java/org/greatsql/greatsqlmcp/controller/McpController.java
++++ b/src/main/java/org/greatsql/greatsqlmcp/controller/McpController.java
+@@ -119,6 +119,20 @@ public class McpController {
+                                         "required", new String[]{}
+                                 )
+                         ),
++                        Map.of(
++                                "name", "createDB",
++                                "description", "创建一个新数据库",
++                                "inputSchema", Map.of(
++                                        "type", "object",
++                                        "properties", Map.of(
++                                                "database", Map.of(
++                                                        "type", "string",
++                                                        "description", "数据库名称"
++                                                )
++                                        ),
++                                        "required", new String[]{"database"}
++                                )
++                        ),
+                         Map.of(
+                                 "name", "listTables",
+                                 "description", "列出指定数据库中的所有表",
+@@ -263,6 +277,15 @@ public class McpController {
+ 
+         Object result = switch (name) {
+             case "listDatabases" -> databaseService.listDatabases();
++
++            case "createDB" -> {
++                String database = (String) arguments.get("database");
++                if (database == null) {
++                    yield Map.of("error", "数据库名称不能为空");
++                }
++                yield databaseService.createDB(database);
++            }
++
+             case "listTables" -> {
+                 String database = (String) arguments.get("database");
+                 if (database == null) {
+@@ -270,6 +293,7 @@ public class McpController {
+                 }
+                 yield databaseService.listTables(database);
+             }
++
+             case "executeQuery" -> {
+                 String database = (String) arguments.get("database");
+                 String query = (String) arguments.get("query");
+@@ -278,6 +302,7 @@ public class McpController {
+                 }
+                 yield databaseService.executeQuery(database, query);
+             }
++
+             case "getTableRowCount" -> {
+                 String database = (String) arguments.get("database");
+                 String tableName = (String) arguments.get("tableName");
+@@ -327,4 +352,4 @@ public class McpController {
+         );
+     }
+ 
+-}
+\ No newline at end of file
++}
+diff --git a/src/main/java/org/greatsql/greatsqlmcp/service/DatabaseService.java b/src/main/java/org/greatsql/greatsqlmcp/service/DatabaseService.java
+index 0e212be..0bab7be 100644
+--- a/src/main/java/org/greatsql/greatsqlmcp/service/DatabaseService.java
++++ b/src/main/java/org/greatsql/greatsqlmcp/service/DatabaseService.java
+@@ -41,6 +41,20 @@ public class DatabaseService {
+         return databases;
+     }
+ 
++    @Tool(name = "createDB", description = "创建一个新数据库")
++    public int createDB( @ToolParam(description = "数据库名称") String database) {
++
++        System.out.println("create database: " + database);
++        String sql = "CREATE DATABASE IF NOT EXISTS " + database;
++
++        try (Connection conn = connectionService.getConnection();
++             PreparedStatement stmt = conn.prepareStatement(sql)) {
++	       stmt.executeUpdate();
++        } catch (SQLException e) {
++            throw new RuntimeException("无法创建指定数据库：" + e.getMessage(), e);
++        }
++	return 0;
++    }
+ 
+     @Tool(name = "listTables", description = "列出指定数据库中的所有表")
+     public List<TableInfo> listTables(
+@@ -273,4 +287,4 @@ public class DatabaseService {
+         }
+     }
+ 
+-}
+\ No newline at end of file
++}
+```
+相应修改的代码已放在文件 *mcp-example-createDB.patch* 中，可以直接执行下面的命令完成合并
+
+```bash
+$ patch -p1 < ./mcp-example-createDB.patch
+patching file src/main/java/org/greatsql/greatsqlmcp/controller/McpController.java
+patching file src/main/java/org/greatsql/greatsqlmcp/service/DatabaseService.java
+```
+
+对新功能进行测试，如果没问题就可以正式提交代码。
 
 ### 提交代码
 
-```
-git add .
-git commit -m "feat: 描述你的修改内容"
-git push origin feature/your-feature-name
+```bash
+$ git add .
+$ git commit -m "feat: 描述你的修改内容"
+$ git push origin feature/your-feature-name
 ```
 
 ### 发起 Pull Request
