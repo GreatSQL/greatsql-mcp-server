@@ -319,4 +319,34 @@ public class DatabaseService {
         return results;
     }
 
+    @Tool(name = "avgSQLRT", description = "计算SQL请求平均响应耗时")
+    public double avgSQLRT() {
+        String sql = "SELECT BENCHMARK(1000000,AES_ENCRYPT('hello','GreatSQL'))";
+        long totalTime = 0;
+        int iterations = 10;
+        
+        try (Connection conn = connectionService.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            
+            for (int i = 0; i < iterations; i++) {
+                long startTime = System.currentTimeMillis();
+                stmt.executeQuery();
+                long endTime = System.currentTimeMillis();
+                totalTime += (endTime - startTime);
+                Thread.sleep(1000); // 间隔1秒
+            }
+            
+            double avgTime = (double) totalTime / iterations;
+            
+            if (avgTime > 50) {
+                System.out.println("严重级告警：SQL请求平均响应耗时 " + avgTime + " ms");
+            } else if (avgTime > 10) {
+                System.out.println("一般级告警：SQL请求平均响应耗时 " + avgTime + " ms");
+            }
+            
+            return avgTime;
+        } catch (SQLException | InterruptedException e) {
+            throw new RuntimeException("计算SQL请求平均响应耗时失败：" + e.getMessage(), e);
+        }
+    }
 }

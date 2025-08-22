@@ -272,6 +272,15 @@ public class McpController {
                                         "properties", Map.of(),
                                         "required", new String[]{}
                                 )
+                        ),
+                        Map.of(
+                                "name", "avgSQLRT",
+                                "description", "计算SQL请求平均响应耗时",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
                         )
                 }
         );
@@ -293,6 +302,7 @@ public class McpController {
 
         Object result = switch (name) {
             case "listDatabases" -> databaseService.listDatabases();
+            case "avgSQLRT" -> databaseService.avgSQLRT();
             case "listTables" -> {
                 String database = (String) arguments.get("database");
                 if (database == null) {
