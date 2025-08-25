@@ -506,8 +506,8 @@ public class DatabaseService {
         }
     }
 
-    @Tool(name = "findPotentialMemoryHogs", description = "检查数据库中是否存在内存异常情况")
-    public Map<String, String> findPotentialMemoryHogs() {
+    @Tool(name = "findAbnormalMemoryIssue", description = "检查数据库中是否存在内存异常情况")
+    public Map<String, String> findAbnormalMemoryIssue() {
         Map<String, String> results = new HashMap<>();
         
         try (Connection conn = connectionService.getConnection()) {

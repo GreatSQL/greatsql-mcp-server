@@ -301,7 +301,7 @@ public class McpController {
                                 )
                         ),
                         Map.of(
-                                "name", "findPotentialMemoryHogs",
+                                "name", "findAbnormalMemoryIssue",
                                 "description", "检查数据库中是否存在内存异常情况",
                                 "inputSchema", Map.of(
                                         "type", "object",
@@ -398,8 +398,8 @@ public class McpController {
             case "checkMGRStatus" -> {
                 yield databaseService.checkMGRStatus();
             }
-            case "findPotentialMemoryHogs" -> {
-                yield databaseService.findPotentialMemoryHogs();
+            case "findAbnormalMemoryIssue" -> {
+                yield databaseService.findAbnormalMemoryIssue();
             }
             default -> Map.of("error", "未知的工具: " + name);
         };
