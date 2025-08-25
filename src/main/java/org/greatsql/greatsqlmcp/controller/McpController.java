@@ -299,6 +299,15 @@ public class McpController {
                                         "properties", Map.of(),
                                         "required", new String[]{}
                                 )
+                        ),
+                        Map.of(
+                                "name", "findPotentialMemoryHogs",
+                                "description", "检查数据库中是否存在内存异常情况",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
                         )
                 }
         );
@@ -388,6 +397,9 @@ public class McpController {
             }
             case "checkMGRStatus" -> {
                 yield databaseService.checkMGRStatus();
+            }
+            case "findPotentialMemoryHogs" -> {
+                yield databaseService.findPotentialMemoryHogs();
             }
             default -> Map.of("error", "未知的工具: " + name);
         };

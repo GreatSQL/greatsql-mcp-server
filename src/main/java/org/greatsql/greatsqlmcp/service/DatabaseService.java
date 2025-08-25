@@ -505,4 +505,86 @@ public class DatabaseService {
             }
         }
     }
+
+    @Tool(name = "findPotentialMemoryHogs", description = "检查数据库中是否存在内存异常情况")
+    public Map<String, String> findPotentialMemoryHogs() {
+        Map<String, String> results = new HashMap<>();
+        
+        try (Connection conn = connectionService.getConnection()) {
+            // 1. 检查全局内存模块异常
+            checkGlobalMemoryEvents(conn, results);
+            
+            // 2. 检查线程内存异常
+            checkThreadMemoryEvents(conn, results);
+            
+        } catch (SQLException e) {
+            throw new RuntimeException("检查内存异常时出错：" + e.getMessage(), e);
+        }
+        
+        return results;
+    }
+    
+    private void checkGlobalMemoryEvents(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT EVENT_NAME, SUM_NUMBER_OF_BYTES_ALLOC FROM " +
+                     "PERFORMANCE_SCHEMA.MEMORY_SUMMARY_GLOBAL_BY_EVENT_NAME " +
+                     "WHERE SUM_NUMBER_OF_BYTES_ALLOC >= 1073741824 " +
+                     "ORDER BY SUM_NUMBER_OF_BYTES_ALLOC DESC";
+        
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            
+            while (rs.next()) {
+                String eventName = rs.getString("EVENT_NAME");
+                long bytesAlloc = rs.getLong("SUM_NUMBER_OF_BYTES_ALLOC");
+                
+                if ("memory/innodb/buf_buf_pool".equals(eventName)) {
+                    // 检查innodb buffer pool是否异常溢出
+                    long bufferPoolSize = getInnoDBBufferPoolSize(conn);
+                    if (bytesAlloc > bufferPoolSize * 1.2) {
+                        results.put("memory_innodb_buffer_pool", "严重级告警：InnoDB Buffer Pool内存使用量（" + bytesAlloc + " bytes）超过配置值（" + bufferPoolSize + " bytes），可能存在内存泄漏风险");
+                    }
+                } else if (eventName.startsWith("memory/sql/") || "memory/memory/HP_PTRS".equals(eventName) || "memory/sql/Filesort_buffer::sort_keys".equals(eventName)) {
+                    results.put("memory_inefficient_sql", "一般级告警：模块 " + eventName + " 内存使用量较高（" + bytesAlloc + " bytes），可能存在低效SQL，建议检查慢查询并优化");
+                }
+            }
+        }
+    }
+    
+    private long getInnoDBBufferPoolSize(Connection conn) throws SQLException {
+        String sql = "SHOW VARIABLES LIKE 'innodb_buffer_pool_size'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                return rs.getLong("Value");
+            }
+        }
+        return 0;
+    }
+    
+    private void checkThreadMemoryEvents(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT THREAD_ID, EVENT_NAME, SUM_NUMBER_OF_BYTES_ALLOC FROM " +
+                     "PERFORMANCE_SCHEMA.MEMORY_SUMMARY_BY_THREAD_BY_EVENT_NAME " +
+                     "WHERE SUM_NUMBER_OF_BYTES_ALLOC >= 1073741824 " +
+                     "ORDER BY SUM_NUMBER_OF_BYTES_ALLOC DESC";
+        
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            
+            int highMemoryThreads = 0;
+            while (rs.next()) {
+                String eventName = rs.getString("EVENT_NAME");
+                long bytesAlloc = rs.getLong("SUM_NUMBER_OF_BYTES_ALLOC");
+                
+                if (eventName.startsWith("memory/innodb/") || eventName.startsWith("memory/sql/")) {
+                    highMemoryThreads++;
+                }
+            }
+            
+            if (highMemoryThreads > 10) {
+                results.put("memory_high_threads", "严重级告警：当前有 " + highMemoryThreads + " 个线程内存使用量超过1GB，可能存在大量活跃连接或低效SQL，建议检查慢查询并优化");
+            } else if (highMemoryThreads > 0) {
+                results.put("memory_high_threads", "一般级告警：当前有 " + highMemoryThreads + " 个线程内存使用量超过1GB，建议检查慢查询并优化");
+            }
+        }
+    }
 }
