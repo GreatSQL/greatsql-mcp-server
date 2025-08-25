@@ -281,6 +281,15 @@ public class McpController {
                                         "properties", Map.of(),
                                         "required", new String[]{}
                                 )
+                        ),
+                        Map.of(
+                                "name", "listNotableWaitEvents",
+                                "description", "检查需要关注的数据库等待事件",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
                         )
                 }
         );
@@ -364,6 +373,9 @@ public class McpController {
             }
             case "checkCriticalTransactions" -> {
                 yield databaseService.checkCriticalTransactions();
+            }
+            case "listNotableWaitEvents" -> {
+                yield databaseService.listNotableWaitEvents();
             }
             default -> Map.of("error", "未知的工具: " + name);
         };

@@ -349,4 +349,92 @@ public class DatabaseService {
             throw new RuntimeException("计算SQL请求平均响应耗时失败：" + e.getMessage(), e);
         }
     }
+
+    @Tool(name = "listNotableWaitEvents", description = "检查需要关注的数据库等待事件")
+    public Map<String, String> listNotableWaitEvents() {
+        Map<String, String> results = new HashMap<>();
+        
+        try (Connection conn = connectionService.getConnection()) {
+            // 1. 检查行锁等待
+            checkRowLockWaits(conn, results);
+            
+            // 2. 检查Buffer Pool等待
+            checkBufferPoolWaits(conn, results);
+            
+            // 3. 检查Redo Log等待
+            checkRedoLogWaits(conn, results);
+            
+            // 4. 检查Undo Log清理
+            checkUndoLogPurge(conn, results);
+            
+        } catch (SQLException e) {
+            throw new RuntimeException("检查等待事件时出错：" + e.getMessage(), e);
+        }
+        
+        return results;
+    }
+    
+    private void checkRowLockWaits(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT variable_value FROM performance_schema.global_status " +
+                     "WHERE variable_name = 'Innodb_row_lock_current_waits'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                int value = rs.getInt(1);
+                if (value > 10) {
+                    results.put("row_lock_wait", "严重级告警：当前有 " + value + " 个活跃的行锁等待，请DBA立即介入检查");
+                } else if (value > 0) {
+                    results.put("row_lock_wait", "一般级告警：当前有 " + value + " 个活跃的行锁等待，建议DBA检查");
+                }
+            }
+        }
+    }
+    
+    private void checkBufferPoolWaits(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT variable_value FROM performance_schema.global_status " +
+                     "WHERE variable_name = 'Innodb_buffer_pool_wait_free'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                int value = rs.getInt(1);
+                if (value > 10) {
+                    results.put("buffer_pool_wait", "严重级告警：Buffer Pool等待事件 " + value + " 次，请立即调大innodb_buffer_pool_size并检查");
+                } else if (value > 0) {
+                    results.put("buffer_pool_wait", "一般级告警：Buffer Pool等待事件 " + value + " 次，建议调大innodb_buffer_pool_size");
+                }
+            }
+        }
+    }
+    
+    private void checkRedoLogWaits(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT variable_value FROM performance_schema.global_status " +
+                     "WHERE variable_name = 'Innodb_log_waits'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                int value = rs.getInt(1);
+                if (value > 10) {
+                    results.put("redo_log_wait", "严重级告警：Redo Log等待事件 " + value + " 次，请立即调大innodb_log_buffer_size并检查");
+                } else if (value > 0) {
+                    results.put("redo_log_wait", "一般级告警：Redo Log等待事件 " + value + " 次，建议调大innodb_log_buffer_size");
+                }
+            }
+        }
+    }
+    
+    private void checkUndoLogPurge(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT COUNT, COMMENT FROM information_schema.INNODB_METRICS " +
+                     "WHERE NAME = 'trx_rseg_history_len'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                int value = rs.getInt(1);
+                if (value > 5000) {
+                    results.put("undo_log_purge", "严重级告警：未清理的undo log数量 " + value + "，请DBA立即介入检查");
+                } else if (value > 1000) {
+                    results.put("undo_log_purge", "一般级告警：未清理的undo log数量 " + value + "，建议DBA检查");
+                }
+            }
+        }
+    }
 }
