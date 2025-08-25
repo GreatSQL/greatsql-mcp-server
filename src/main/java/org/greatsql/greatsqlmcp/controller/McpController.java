@@ -290,6 +290,15 @@ public class McpController {
                                         "properties", Map.of(),
                                         "required", new String[]{}
                                 )
+                        ),
+                        Map.of(
+                                "name", "checkMGRStatus",
+                                "description", "监控MGR集群状态",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
                         )
                 }
         );
@@ -376,6 +385,9 @@ public class McpController {
             }
             case "listNotableWaitEvents" -> {
                 yield databaseService.listNotableWaitEvents();
+            }
+            case "checkMGRStatus" -> {
+                yield databaseService.checkMGRStatus();
             }
             default -> Map.of("error", "未知的工具: " + name);
         };

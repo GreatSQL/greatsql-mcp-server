@@ -437,4 +437,72 @@ public class DatabaseService {
             }
         }
     }
+
+    @Tool(name = "checkMGRStatus", description = "监控MGR集群状态")
+    public Map<String, String> checkMGRStatus() {
+        Map<String, String> results = new HashMap<>();
+        
+        try (Connection conn = connectionService.getConnection()) {
+            // 1. 检查MGR是否已启用
+            checkMGREnabled(conn, results);
+            
+            // 2. 检查MGR事务队列状态
+            checkMGRTransactionQueue(conn, results);
+            
+        } catch (SQLException e) {
+            throw new RuntimeException("检查MGR状态时出错：" + e.getMessage(), e);
+        }
+        
+        return results;
+    }
+    
+    private void checkMGREnabled(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT * FROM performance_schema.replication_group_members";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (!rs.next()) {
+                results.put("mgr_enabled", "当前没有启用MGR");
+                return;
+            }
+            
+            boolean hasOnlineMember = false;
+            do {
+                if ("ONLINE".equals(rs.getString("MEMBER_STATE"))) {
+                    hasOnlineMember = true;
+                    break;
+                }
+            } while (rs.next());
+            
+            if (!hasOnlineMember) {
+                results.put("mgr_status", "严重级告警：MGR已启用但无ONLINE状态的成员");
+            } else {
+                results.put("mgr_status", "MGR运行正常");
+            }
+        }
+    }
+    
+    private void checkMGRTransactionQueue(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT MEMBER_ID as id, COUNT_TRANSACTIONS_IN_QUEUE as trx_tobe_certified, " +
+                     "COUNT_TRANSACTIONS_REMOTE_IN_APPLIER_QUEUE as relaylog_tobe_applied " +
+                     "FROM performance_schema.replication_group_member_stats";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                int trxToCertify = rs.getInt("trx_tobe_certified");
+                int relaylogToApply = rs.getInt("relaylog_tobe_applied");
+                
+                if (trxToCertify > 100) {
+                    results.put("mgr_trx_certify", "严重级告警：待认证事务队列大小 " + trxToCertify);
+                } else if (trxToCertify > 10) {
+                    results.put("mgr_trx_certify", "一般级关注：待认证事务队列大小 " + trxToCertify);
+                }
+                
+                if (relaylogToApply > 100) {
+                    results.put("mgr_relaylog_apply", "严重级告警：待回放事务队列大小 " + relaylogToApply);
+                } else if (relaylogToApply > 10) {
+                    results.put("mgr_relaylog_apply", "一般级关注：待回放事务队列大小 " + relaylogToApply);
+                }
+            }
+        }
+    }
 }
