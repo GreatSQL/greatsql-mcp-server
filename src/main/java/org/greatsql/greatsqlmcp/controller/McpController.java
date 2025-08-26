@@ -308,6 +308,15 @@ public class McpController {
                                         "properties", Map.of(),
                                         "required", new String[]{}
                                 )
+                        ),
+                        Map.of(
+                                "name", "findImproperVars",
+                                "description", "检查数据库系统参数配置是否合理",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
                         )
                 }
         );
@@ -400,6 +409,9 @@ public class McpController {
             }
             case "findAbnormalMemoryIssue" -> {
                 yield databaseService.findAbnormalMemoryIssue();
+            }
+            case "findImproperVars" -> {
+                yield databaseService.findImproperVars();
             }
             default -> Map.of("error", "未知的工具: " + name);
         };

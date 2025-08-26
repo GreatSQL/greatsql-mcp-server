@@ -587,4 +587,269 @@ public class DatabaseService {
             }
         }
     }
+    
+    public Map<String, String> findImproperVars() {
+        Map<String, String> results = new HashMap<>();
+        
+        try (Connection conn = connectionService.getConnection()) {
+            // 查询全局变量和状态
+            Map<String, String> vars = getGlobalVariables(conn);
+            Map<String, String> stats = getGlobalStatus(conn);
+            
+            // 检查连接数配置
+            checkMaxConnections(vars, stats, results);
+            
+            // 检查表缓存配置
+            checkTableCaches(vars, stats, results);
+            
+            // 检查线程缓存配置
+            checkThreadCache(vars, stats, results);
+            
+            // 检查临时表配置
+            checkTempTables(vars, stats, results);
+            
+            // 检查 InnoDB 日志配置
+            checkInnoDBLogs(vars, results);
+            
+            // 检查二进制日志和事务提交配置
+            checkBinaryLogAndFlush(vars, results);
+            
+            // 检查InnoDB日志配置
+            checkInnoDBLogs(vars, results);
+            
+            // 检查并行复制配置
+            checkParallelReplication(vars, results);
+            
+            // 检查IO容量配置
+            checkIOCapacity(vars, results);
+            
+            // 检查并发线程配置
+            checkThreadConcurrency(vars, results);
+            
+            // 检查二进制日志格式
+            checkBinlogFormat(vars, results);
+            
+            // 检查日志缓冲区配置
+            checkLogBuffer(vars, results);
+            
+            // 检查其他推荐配置
+            checkRecommendedSettings(vars, results);
+            
+            // 检查慢查询日志配置
+            checkSlowQuerySettings(vars, results);
+            
+            // 检查缓冲池配置
+            checkBufferPoolSize(vars, results);
+            
+        } catch (SQLException e) {
+            throw new RuntimeException("检查配置参数时出错：" + e.getMessage(), e);
+        }
+        
+        return results;
+    }
+    
+    private Map<String, String> getGlobalVariables(Connection conn) throws SQLException {
+        Map<String, String> vars = new HashMap<>();
+        String sql = "SELECT * FROM performance_schema.global_variables";
+        
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                vars.put(rs.getString("VARIABLE_NAME"), rs.getString("VARIABLE_VALUE"));
+            }
+        }
+        return vars;
+    }
+    
+    private Map<String, String> getGlobalStatus(Connection conn) throws SQLException {
+        Map<String, String> stats = new HashMap<>();
+        String sql = "SELECT * FROM performance_schema.global_status";
+        
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                stats.put(rs.getString("VARIABLE_NAME"), rs.getString("VARIABLE_VALUE"));
+            }
+        }
+        return stats;
+    }
+    
+    private void checkMaxConnections(Map<String, String> vars, Map<String, String> stats, Map<String, String> results) {
+        if (vars.containsKey("max_connections") && stats.containsKey("Threads_connected")) {
+            int maxConn = Integer.parseInt(vars.get("max_connections"));
+            int currConn = Integer.parseInt(stats.get("Threads_connected"));
+            
+            if (currConn >= maxConn * 0.8) {
+                results.put("max_connections", "警告：当前连接数(" + currConn + ")已接近最大连接数限制(" + maxConn + ")，建议考虑增加max_connections参数值");
+            }
+        }
+    }
+    
+    private void checkTableCaches(Map<String, String> vars, Map<String, String> stats, Map<String, String> results) {
+        // 检查table_open_cache
+        if (vars.containsKey("table_open_cache") && stats.containsKey("Open_tables") && stats.containsKey("Opened_tables")) {
+            int cacheSize = Integer.parseInt(vars.get("table_open_cache"));
+            int openTables = Integer.parseInt(stats.get("Open_tables"));
+            int openedTables = Integer.parseInt(stats.get("Opened_tables"));
+            
+            if (openTables >= cacheSize * 0.8 && openedTables > openTables * 10) {
+                results.put("table_open_cache", "警告：当前打开表数(" + openTables + ")接近缓存限制(" + cacheSize + ")且表打开次数(" + openedTables + ")较高，建议增加table_open_cache参数值");
+            }
+        }
+        
+        // 检查table_definition_cache
+        if (vars.containsKey("table_definition_cache") && stats.containsKey("Open_table_definitions") && stats.containsKey("Opened_table_definitions")) {
+            int cacheSize = Integer.parseInt(vars.get("table_definition_cache"));
+            int openDefs = Integer.parseInt(stats.get("Open_table_definitions"));
+            int openedDefs = Integer.parseInt(stats.get("Opened_table_definitions"));
+            
+            if (openDefs >= cacheSize * 0.8 && openedDefs > openDefs * 10) {
+                results.put("table_definition_cache", "警告：当前打开表定义数(" + openDefs + ")接近缓存限制(" + cacheSize + ")且表定义打开次数(" + openedDefs + ")较高，建议增加table_definition_cache参数值");
+            }
+        }
+    }
+    
+    private void checkThreadCache(Map<String, String> vars, Map<String, String> stats, Map<String, String> results) {
+        if (vars.containsKey("thread_cache_size") && stats.containsKey("Threads_cached") && stats.containsKey("Threads_created")) {
+            int cacheSize = Integer.parseInt(vars.get("thread_cache_size"));
+            int cachedThreads = Integer.parseInt(stats.get("Threads_cached"));
+            int createdThreads = Integer.parseInt(stats.get("Threads_created"));
+            
+            if (cachedThreads <= cacheSize * 0.2 && createdThreads > cachedThreads * 10) {
+                results.put("thread_cache_size", "警告：线程缓存使用率低(" + cachedThreads + "/" + cacheSize + ")但线程创建次数高(" + createdThreads + ")，建议增加thread_cache_size参数值");
+            }
+        }
+    }
+    
+    private void checkTempTables(Map<String, String> vars, Map<String, String> stats, Map<String, String> results) {
+        if (stats.containsKey("Created_tmp_disk_tables") && stats.containsKey("Created_tmp_tables")) {
+            int diskTmpTables = Integer.parseInt(stats.get("Created_tmp_disk_tables"));
+            int memTmpTables = Integer.parseInt(stats.get("Created_tmp_tables"));
+            
+            if (diskTmpTables > 100 || diskTmpTables > memTmpTables * 0.1) {
+                results.put("tmp_table_size", "警告：磁盘临时表创建次数高(" + diskTmpTables + ")，建议增加tmp_table_size和max_heap_table_size参数值(至少96MB)");
+            }
+        }
+    }
+    
+    private void checkBinaryLogAndFlush(Map<String, String> vars, Map<String, String> results) {
+        if (vars.containsKey("sync_binlog") && vars.get("sync_binlog").equals("0")) {
+            results.put("sync_binlog", "警告：sync_binlog参数设置为0，服务器掉电时可能丢失二进制日志数据，建议设置为1");
+        }
+        
+        if (vars.containsKey("innodb_flush_log_at_trx_commit") && vars.get("innodb_flush_log_at_trx_commit").equals("0")) {
+            results.put("innodb_flush_log_at_trx_commit", "警告：innodb_flush_log_at_trx_commit参数设置为0，服务器掉电时可能丢失事务数据，建议设置为1");
+        }
+    }
+    
+    private void checkInnoDBLogs(Map<String, String> vars, Map<String, String> results) {
+        // 检查redo日志大小
+        long var1 = 0;
+        long var2 = 0;
+        if (vars.containsKey("innodb_log_file_size") && vars.containsKey("innodb_log_files_in_group")) {
+            var1 = Long.parseLong(vars.get("innodb_log_file_size")) * Long.parseLong(vars.get("innodb_log_files_in_group"));
+        }
+        if (vars.containsKey("innodb_redo_log_capacity")) {
+            var2 = Long.parseLong(vars.get("innodb_redo_log_capacity"));
+        }
+        
+        if (var1 < 2147483648L && var2 < 2147483648L) { // 2GB
+            results.put("innodb_redo_space", "InnoDB Redo 空间可能不够用，会影响性能");
+        }
+        
+        // 检查日志缓冲区大小
+        if (vars.containsKey("innodb_log_buffer_size")) {
+            long logBufferSize = Long.parseLong(vars.get("innodb_log_buffer_size"));
+            if (logBufferSize < 33554432) { // 32MB
+                results.put("innodb_log_buffer_size", "建议：innodb_log_buffer_size参数值(" + (logBufferSize / 1024 / 1024) + "MB)较小，建议设置为至少32MB");
+            }
+        }
+    }
+    
+    private void checkParallelReplication(Map<String, String> vars, Map<String, String> results) {
+        String parallelType = vars.getOrDefault("slave_parallel_type", vars.getOrDefault("replica_parallel_type", ""));
+        if (!parallelType.equals("LOGICAL_CLOCK")) {
+            results.put("parallel_replication", "警告：并行复制类型设置为" + parallelType + "，建议设置为LOGICAL_CLOCK以获得更好的并行复制性能");
+        }
+    }
+    
+    private void checkIOCapacity(Map<String, String> vars, Map<String, String> results) {
+        if (vars.containsKey("innodb_io_capacity")) {
+            int ioCapacity = Integer.parseInt(vars.get("innodb_io_capacity"));
+            if (ioCapacity < 10000) {
+                results.put("innodb_io_capacity", "警告：innodb_io_capacity参数值(" + ioCapacity + ")较低，建议设置为至少10000");
+            }
+        }
+        
+        if (vars.containsKey("innodb_io_capacity_max")) {
+            int ioCapacityMax = Integer.parseInt(vars.get("innodb_io_capacity_max"));
+            if (ioCapacityMax < 10000) {
+                results.put("innodb_io_capacity_max", "警告：innodb_io_capacity_max参数值(" + ioCapacityMax + ")较低，建议设置为至少10000");
+            }
+        }
+    }
+    
+    private void checkThreadConcurrency(Map<String, String> vars, Map<String, String> results) {
+        if (vars.containsKey("innodb_thread_concurrency") && !vars.get("innodb_thread_concurrency").equals("0")) {
+            results.put("innodb_thread_concurrency", "警告：innodb_thread_concurrency参数设置为" + vars.get("innodb_thread_concurrency") + "，建议设置为0以获得更好的并发性能");
+        }
+    }
+    
+    private void checkBinlogFormat(Map<String, String> vars, Map<String, String> results) {
+        if (vars.containsKey("binlog_format") && !vars.get("binlog_format").equals("ROW")) {
+            results.put("binlog_format", "警告：binlog_format参数设置为" + vars.get("binlog_format") + "，建议设置为ROW以确保数据安全");
+        }
+    }
+    
+    private void checkLogBuffer(Map<String, String> vars, Map<String, String> results) {
+        // 已在checkInnoDBLogs中检查
+    }
+    
+    private void checkRecommendedSettings(Map<String, String> vars, Map<String, String> results) {
+        // 检查各种缓冲区大小
+        checkBufferSize(vars, "sort_buffer_size", 4194304, results); // 4MB
+        checkBufferSize(vars, "join_buffer_size", 4194304, results);
+        checkBufferSize(vars, "read_rnd_buffer_size", 4194304, results);
+        checkBufferSize(vars, "read_buffer_size", 4194304, results);
+        
+        // 检查其他推荐设置
+        checkSetting(vars, "innodb_open_files", "65534", results);
+        checkSetting(vars, "innodb_flush_method", "O_DIRECT", results);
+        checkSetting(vars, "innodb_use_fdatasync", "ON", results);
+        checkSetting(vars, "innodb_adaptive_hash_index", "OFF", results);
+        checkSetting(vars, "innodb_doublewrite_pages", "128", results);
+    }
+    
+    private void checkBufferSize(Map<String, String> vars, String param, long minSize, Map<String, String> results) {
+        if (vars.containsKey(param)) {
+            long size = Long.parseLong(vars.get(param));
+            if (size < minSize) {
+                results.put(param, "建议：" + param + "参数值(" + (size / 1024 / 1024) + "MB)较小，建议设置为至少" + (minSize / 1024 / 1024) + "MB");
+            }
+        }
+    }
+    
+    private void checkSetting(Map<String, String> vars, String param, String recommended, Map<String, String> results) {
+        if (vars.containsKey(param) && !vars.get(param).equals(recommended)) {
+            results.put(param, "建议：" + param + "参数设置为" + vars.get(param) + "，推荐设置为" + recommended);
+        }
+    }
+    
+    private void checkSlowQuerySettings(Map<String, String> vars, Map<String, String> results) {
+        if (vars.containsKey("long_query_time")) {
+            double longQueryTime = Double.parseDouble(vars.get("long_query_time"));
+            if (longQueryTime > 1.0) {
+                results.put("long_query_time", "建议：long_query_time参数值(" + longQueryTime + ")较大，建议设置为0.05-1.0之间");
+            }
+        }
+    }
+    
+    private void checkBufferPoolSize(Map<String, String> vars, Map<String, String> results) {
+        if (vars.containsKey("innodb_buffer_pool_size")) {
+            long bufferPoolSize = Long.parseLong(vars.get("innodb_buffer_pool_size"));
+            if (bufferPoolSize < 2147483648L) { // 2GB
+                results.put("innodb_buffer_pool_size", "警告：innodb_buffer_pool_size参数值(" + (bufferPoolSize / 1024 / 1024) + "MB)较小，建议设置为至少2GB");
+            }
+        }
+    }
 }
