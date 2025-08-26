@@ -273,4 +273,318 @@ public class DatabaseService {
         }
     }
 
+    @Tool(name = "createDB", description = "创建新数据库")
+    public boolean createDB(
+            @ToolParam(description = "数据库名称") String databaseName) {
+        String sql = "CREATE DATABASE " + databaseName;
+
+        try (Connection conn = connectionService.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.executeUpdate();
+            return true;
+        } catch (SQLException e) {
+            throw new RuntimeException("创建数据库时出错：" + e.getMessage(), e);
+        }
+    }
+
+    @Tool(name = "checkCriticalTransactions", description = "检查当前是否有活跃的大事务或长事务")
+    public List<Map<String, Object>> checkCriticalTransactions() {
+        List<Map<String, Object>> results = new ArrayList<>();
+        String sql = "SELECT * FROM information_schema.INNODB_TRX WHERE " +
+                "trx_lock_structs >= 5 OR " +
+                "trx_rows_locked >= 100 OR " +
+                "trx_rows_modified >= 100 OR " +
+                "TIME_TO_SEC(TIMEDIFF(NOW(),trx_started)) > 100";
+
+        try (Connection conn = connectionService.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            int columnCount = rs.getMetaData().getColumnCount();
+
+            while (rs.next()) {
+                Map<String, Object> row = new HashMap<>();
+                for (int i = 1; i <= columnCount; i++) {
+                    String columnName = rs.getMetaData().getColumnName(i);
+                    Object value = rs.getObject(i);
+                    row.put(columnName, value);
+                }
+                results.add(row);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("查询需要关注的事务时出错：" + e.getMessage(), e);
+        }
+
+        return results;
+    }
+
+    @Tool(name = "avgSQLRT", description = "计算SQL请求平均响应耗时")
+    public double avgSQLRT() {
+        String sql = "SELECT BENCHMARK(1000000,AES_ENCRYPT('hello','GreatSQL'))";
+        long totalTime = 0;
+        int iterations = 10;
+        
+        try (Connection conn = connectionService.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            
+            for (int i = 0; i < iterations; i++) {
+                long startTime = System.currentTimeMillis();
+                stmt.executeQuery();
+                long endTime = System.currentTimeMillis();
+                totalTime += (endTime - startTime);
+                Thread.sleep(1000); // 间隔1秒
+            }
+            
+            double avgTime = (double) totalTime / iterations;
+            
+            if (avgTime > 50) {
+                System.out.println("严重级告警：SQL请求平均响应耗时 " + avgTime + " ms");
+            } else if (avgTime > 10) {
+                System.out.println("一般级告警：SQL请求平均响应耗时 " + avgTime + " ms");
+            }
+            
+            return avgTime;
+        } catch (SQLException | InterruptedException e) {
+            throw new RuntimeException("计算SQL请求平均响应耗时失败：" + e.getMessage(), e);
+        }
+    }
+
+    @Tool(name = "listNotableWaitEvents", description = "检查需要关注的数据库等待事件")
+    public Map<String, String> listNotableWaitEvents() {
+        Map<String, String> results = new HashMap<>();
+        
+        try (Connection conn = connectionService.getConnection()) {
+            // 1. 检查行锁等待
+            checkRowLockWaits(conn, results);
+            
+            // 2. 检查Buffer Pool等待
+            checkBufferPoolWaits(conn, results);
+            
+            // 3. 检查Redo Log等待
+            checkRedoLogWaits(conn, results);
+            
+            // 4. 检查Undo Log清理
+            checkUndoLogPurge(conn, results);
+            
+        } catch (SQLException e) {
+            throw new RuntimeException("检查等待事件时出错：" + e.getMessage(), e);
+        }
+        
+        return results;
+    }
+    
+    private void checkRowLockWaits(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT variable_value FROM performance_schema.global_status " +
+                     "WHERE variable_name = 'Innodb_row_lock_current_waits'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                int value = rs.getInt(1);
+                if (value > 10) {
+                    results.put("row_lock_wait", "严重级告警：当前有 " + value + " 个活跃的行锁等待，请DBA立即介入检查");
+                } else if (value > 0) {
+                    results.put("row_lock_wait", "一般级告警：当前有 " + value + " 个活跃的行锁等待，建议DBA检查");
+                }
+            }
+        }
+    }
+    
+    private void checkBufferPoolWaits(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT variable_value FROM performance_schema.global_status " +
+                     "WHERE variable_name = 'Innodb_buffer_pool_wait_free'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                int value = rs.getInt(1);
+                if (value > 10) {
+                    results.put("buffer_pool_wait", "严重级告警：Buffer Pool等待事件 " + value + " 次，请立即调大innodb_buffer_pool_size并检查");
+                } else if (value > 0) {
+                    results.put("buffer_pool_wait", "一般级告警：Buffer Pool等待事件 " + value + " 次，建议调大innodb_buffer_pool_size");
+                }
+            }
+        }
+    }
+    
+    private void checkRedoLogWaits(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT variable_value FROM performance_schema.global_status " +
+                     "WHERE variable_name = 'Innodb_log_waits'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                int value = rs.getInt(1);
+                if (value > 10) {
+                    results.put("redo_log_wait", "严重级告警：Redo Log等待事件 " + value + " 次，请立即调大innodb_log_buffer_size并检查");
+                } else if (value > 0) {
+                    results.put("redo_log_wait", "一般级告警：Redo Log等待事件 " + value + " 次，建议调大innodb_log_buffer_size");
+                }
+            }
+        }
+    }
+    
+    private void checkUndoLogPurge(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT COUNT, COMMENT FROM information_schema.INNODB_METRICS " +
+                     "WHERE NAME = 'trx_rseg_history_len'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                int value = rs.getInt(1);
+                if (value > 5000) {
+                    results.put("undo_log_purge", "严重级告警：未清理的undo log数量 " + value + "，请DBA立即介入检查");
+                } else if (value > 1000) {
+                    results.put("undo_log_purge", "一般级告警：未清理的undo log数量 " + value + "，建议DBA检查");
+                }
+            }
+        }
+    }
+
+    @Tool(name = "checkMGRStatus", description = "监控MGR集群状态")
+    public Map<String, String> checkMGRStatus() {
+        Map<String, String> results = new HashMap<>();
+        
+        try (Connection conn = connectionService.getConnection()) {
+            // 1. 检查MGR是否已启用
+            checkMGREnabled(conn, results);
+            
+            // 2. 检查MGR事务队列状态
+            checkMGRTransactionQueue(conn, results);
+            
+        } catch (SQLException e) {
+            throw new RuntimeException("检查MGR状态时出错：" + e.getMessage(), e);
+        }
+        
+        return results;
+    }
+    
+    private void checkMGREnabled(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT * FROM performance_schema.replication_group_members";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (!rs.next()) {
+                results.put("mgr_enabled", "当前没有启用MGR");
+                return;
+            }
+            
+            boolean hasOnlineMember = false;
+            do {
+                if ("ONLINE".equals(rs.getString("MEMBER_STATE"))) {
+                    hasOnlineMember = true;
+                    break;
+                }
+            } while (rs.next());
+            
+            if (!hasOnlineMember) {
+                results.put("mgr_status", "严重级告警：MGR已启用但无ONLINE状态的成员");
+            } else {
+                results.put("mgr_status", "MGR运行正常");
+            }
+        }
+    }
+    
+    private void checkMGRTransactionQueue(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT MEMBER_ID as id, COUNT_TRANSACTIONS_IN_QUEUE as trx_tobe_certified, " +
+                     "COUNT_TRANSACTIONS_REMOTE_IN_APPLIER_QUEUE as relaylog_tobe_applied " +
+                     "FROM performance_schema.replication_group_member_stats";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                int trxToCertify = rs.getInt("trx_tobe_certified");
+                int relaylogToApply = rs.getInt("relaylog_tobe_applied");
+                
+                if (trxToCertify > 100) {
+                    results.put("mgr_trx_certify", "严重级告警：待认证事务队列大小 " + trxToCertify);
+                } else if (trxToCertify > 10) {
+                    results.put("mgr_trx_certify", "一般级关注：待认证事务队列大小 " + trxToCertify);
+                }
+                
+                if (relaylogToApply > 100) {
+                    results.put("mgr_relaylog_apply", "严重级告警：待回放事务队列大小 " + relaylogToApply);
+                } else if (relaylogToApply > 10) {
+                    results.put("mgr_relaylog_apply", "一般级关注：待回放事务队列大小 " + relaylogToApply);
+                }
+            }
+        }
+    }
+
+    @Tool(name = "findAbnormalMemoryIssue", description = "检查数据库中是否存在内存异常情况")
+    public Map<String, String> findAbnormalMemoryIssue() {
+        Map<String, String> results = new HashMap<>();
+        
+        try (Connection conn = connectionService.getConnection()) {
+            // 1. 检查全局内存模块异常
+            checkGlobalMemoryEvents(conn, results);
+            
+            // 2. 检查线程内存异常
+            checkThreadMemoryEvents(conn, results);
+            
+        } catch (SQLException e) {
+            throw new RuntimeException("检查内存异常时出错：" + e.getMessage(), e);
+        }
+        
+        return results;
+    }
+    
+    private void checkGlobalMemoryEvents(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT EVENT_NAME, SUM_NUMBER_OF_BYTES_ALLOC FROM " +
+                     "PERFORMANCE_SCHEMA.MEMORY_SUMMARY_GLOBAL_BY_EVENT_NAME " +
+                     "WHERE SUM_NUMBER_OF_BYTES_ALLOC >= 1073741824 " +
+                     "ORDER BY SUM_NUMBER_OF_BYTES_ALLOC DESC";
+        
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            
+            while (rs.next()) {
+                String eventName = rs.getString("EVENT_NAME");
+                long bytesAlloc = rs.getLong("SUM_NUMBER_OF_BYTES_ALLOC");
+                
+                if ("memory/innodb/buf_buf_pool".equals(eventName)) {
+                    // 检查innodb buffer pool是否异常溢出
+                    long bufferPoolSize = getInnoDBBufferPoolSize(conn);
+                    if (bytesAlloc > bufferPoolSize * 1.2) {
+                        results.put("memory_innodb_buffer_pool", "严重级告警：InnoDB Buffer Pool内存使用量（" + bytesAlloc + " bytes）超过配置值（" + bufferPoolSize + " bytes），可能存在内存泄漏风险");
+                    }
+                } else if (eventName.startsWith("memory/sql/") || "memory/memory/HP_PTRS".equals(eventName) || "memory/sql/Filesort_buffer::sort_keys".equals(eventName)) {
+                    results.put("memory_inefficient_sql", "一般级告警：模块 " + eventName + " 内存使用量较高（" + bytesAlloc + " bytes），可能存在低效SQL，建议检查慢查询并优化");
+                }
+            }
+        }
+    }
+    
+    private long getInnoDBBufferPoolSize(Connection conn) throws SQLException {
+        String sql = "SHOW VARIABLES LIKE 'innodb_buffer_pool_size'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                return rs.getLong("Value");
+            }
+        }
+        return 0;
+    }
+    
+    private void checkThreadMemoryEvents(Connection conn, Map<String, String> results) throws SQLException {
+        String sql = "SELECT THREAD_ID, EVENT_NAME, SUM_NUMBER_OF_BYTES_ALLOC FROM " +
+                     "PERFORMANCE_SCHEMA.MEMORY_SUMMARY_BY_THREAD_BY_EVENT_NAME " +
+                     "WHERE SUM_NUMBER_OF_BYTES_ALLOC >= 1073741824 " +
+                     "ORDER BY SUM_NUMBER_OF_BYTES_ALLOC DESC";
+        
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            
+            int highMemoryThreads = 0;
+            while (rs.next()) {
+                String eventName = rs.getString("EVENT_NAME");
+                long bytesAlloc = rs.getLong("SUM_NUMBER_OF_BYTES_ALLOC");
+                
+                if (eventName.startsWith("memory/innodb/") || eventName.startsWith("memory/sql/")) {
+                    highMemoryThreads++;
+                }
+            }
+            
+            if (highMemoryThreads > 10) {
+                results.put("memory_high_threads", "严重级告警：当前有 " + highMemoryThreads + " 个线程内存使用量超过1GB，可能存在大量活跃连接或低效SQL，建议检查慢查询并优化");
+            } else if (highMemoryThreads > 0) {
+                results.put("memory_high_threads", "一般级告警：当前有 " + highMemoryThreads + " 个线程内存使用量超过1GB，建议检查慢查询并优化");
+            }
+        }
+    }
 }

@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.*;
 import org.greatsql.greatsqlmcp.config.AuthConfig;
 import org.springframework.http.HttpStatus;
 import java.util.Map;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import jakarta.annotation.PostConstruct;
 
 @RestController
 @CrossOrigin(origins = "*")
@@ -17,6 +19,11 @@ public class McpController {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @PostConstruct
+    public void init() {
+        objectMapper.registerModule(new JavaTimeModule());
+    }
 
     @Autowired
     private AuthConfig authConfig;
@@ -242,6 +249,65 @@ public class McpController {
                                         ),
                                         "required", new String[]{"database", "tableName", "whereClause"}
                                 )
+                        ),
+                        Map.of(
+                                "name", "createDB",
+                                "description", "创建新数据库",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(
+                                                "databaseName", Map.of(
+                                                        "type", "string",
+                                                        "description", "数据库名称"
+                                                )
+                                        ),
+                                        "required", new String[]{"databaseName"}
+                                )
+                        ),
+                        Map.of(
+                                "name", "checkCriticalTransactions",
+                                "description", "检查当前是否有活跃的大事务或长事务",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
+                        ),
+                        Map.of(
+                                "name", "avgSQLRT",
+                                "description", "计算SQL请求平均响应耗时",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
+                        ),
+                        Map.of(
+                                "name", "listNotableWaitEvents",
+                                "description", "检查需要关注的数据库等待事件",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
+                        ),
+                        Map.of(
+                                "name", "checkMGRStatus",
+                                "description", "监控MGR集群状态",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
+                        ),
+                        Map.of(
+                                "name", "findAbnormalMemoryIssue",
+                                "description", "检查数据库中是否存在内存异常情况",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
                         )
                 }
         );
@@ -263,6 +329,7 @@ public class McpController {
 
         Object result = switch (name) {
             case "listDatabases" -> databaseService.listDatabases();
+            case "avgSQLRT" -> databaseService.avgSQLRT();
             case "listTables" -> {
                 String database = (String) arguments.get("database");
                 if (database == null) {
@@ -314,6 +381,25 @@ public class McpController {
                     yield Map.of("error", "所有参数都不能为空");
                 }
                 yield databaseService.deleteData(database, tableName, whereClause);
+            }
+            case "createDB" -> {
+                String databaseName = (String) arguments.get("databaseName");
+                if (databaseName == null) {
+                    yield Map.of("error", "数据库名称不能为空");
+                }
+                yield databaseService.createDB(databaseName);
+            }
+            case "checkCriticalTransactions" -> {
+                yield databaseService.checkCriticalTransactions();
+            }
+            case "listNotableWaitEvents" -> {
+                yield databaseService.listNotableWaitEvents();
+            }
+            case "checkMGRStatus" -> {
+                yield databaseService.checkMGRStatus();
+            }
+            case "findAbnormalMemoryIssue" -> {
+                yield databaseService.findAbnormalMemoryIssue();
             }
             default -> Map.of("error", "未知的工具: " + name);
         };

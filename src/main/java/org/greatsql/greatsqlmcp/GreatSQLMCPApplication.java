@@ -9,10 +9,10 @@ import org.springframework.context.annotation.Bean;
 import java.util.List;
 
 @SpringBootApplication
-public class GreatSqlMcpApplication {
+public class GreatSQLMCPApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(GreatSqlMcpApplication.class, args);
+        SpringApplication.run(GreatSQLMCPApplication.class, args);
     }
 
     @Bean
