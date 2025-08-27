@@ -317,6 +317,15 @@ public class McpController {
                                         "properties", Map.of(),
                                         "required", new String[]{}
                                 )
+                        ),
+                        Map.of(
+                                "name", "monitorReplicationLag",
+                                "description", "监控主从复制延迟",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
                         )
                 }
         );
@@ -398,6 +407,7 @@ public class McpController {
                 }
                 yield databaseService.createDB(databaseName);
             }
+            case "monitorReplicationLag" -> databaseService.monitorReplicationLag();
             case "checkCriticalTransactions" -> {
                 yield databaseService.checkCriticalTransactions();
             }

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -97,7 +98,6 @@ public class DatabaseService {
     public List<Map<String, Object>> executeQuery(
             @ToolParam(description = "数据库名称") String database,
             @ToolParam(description = "SQL查询语句") String query) {
-
         List<Map<String, Object>> results = new ArrayList<>();
 
         try (Connection conn = connectionService.getConnection(database);
@@ -120,6 +120,100 @@ public class DatabaseService {
         }
 
         return results;
+    }
+
+    public Map<String, String> getSlaveStatus(Connection conn) throws SQLException {
+        Map<String, String> slaveStatus = new HashMap<>();
+        String sql = "SHOW SLAVE STATUS";
+
+        try (PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            if (rs.next()) {
+                ResultSetMetaData metaData = rs.getMetaData();
+                int columnCount = metaData.getColumnCount();
+
+                for (int i = 1; i <= columnCount; i++) {
+                    String columnName = metaData.getColumnName(i);
+                    String columnValue = rs.getString(i);
+                    slaveStatus.put(columnName, columnValue);
+                }
+
+                // 检查 Slave_IO_Running 和 Slave_SQL_Running 状态
+                String ioRunning = slaveStatus.get("Slave_IO_Running");
+                String sqlRunning = slaveStatus.get("Slave_SQL_Running");
+
+                if (!"Yes".equals(ioRunning) || !"Yes".equals(sqlRunning)) {
+                    // 检查错误代码和错误信息
+                    String ioErrno = slaveStatus.get("Last_IO_Errno");
+                    String sqlErrno = slaveStatus.get("Last_SQL_Errno");
+                    String lastErrno = slaveStatus.get("Last_Errno");
+
+                    String ioError = slaveStatus.get("Last_IO_Error");
+                    String sqlError = slaveStatus.get("Last_SQL_Error");
+                    String lastError = slaveStatus.get("Last_Error");
+
+                    StringBuilder repairAdvice = new StringBuilder();
+
+                    if (!"0".equals(ioErrno) && ioErrno != null && !ioErrno.isEmpty()) {
+                        repairAdvice.append("IO 线程错误代码: ").append(ioErrno).append(", 错误信息: ").append(ioError).append("\n");
+                    }
+
+                    if (!"0".equals(sqlErrno) && sqlErrno != null && !sqlErrno.isEmpty()) {
+                        repairAdvice.append("SQL 线程错误代码: ").append(sqlErrno).append(", 错误信息: ").append(sqlError).append("\n");
+                    }
+
+                    if (!"0".equals(lastErrno) && lastErrno != null && !lastErrno.isEmpty()) {
+                        repairAdvice.append("最近错误代码: ").append(lastErrno).append(", 错误信息: ").append(lastError).append("\n");
+                    }
+
+                    if (repairAdvice.length() > 0) {
+                        repairAdvice.append("修复建议: \n");
+                        repairAdvice.append("1. 检查主从服务器网络连接是否正常。\n");
+                        repairAdvice.append("2. 检查主从服务器的配置是否一致。\n");
+                        repairAdvice.append("3. 检查主从服务器的日志文件，确认是否有其他错误。\n");
+                        repairAdvice.append("4. 根据错误信息，参考官方文档或社区解决方案进行修复。\n");
+
+                        slaveStatus.put("RepairAdvice", repairAdvice.toString());
+                    }
+                }
+
+                // 检查 secondsBehindMaster
+                String secondsBehindMaster = slaveStatus.get("Seconds_Behind_Master");
+                if (secondsBehindMaster != null && !secondsBehindMaster.isEmpty()) {
+                    try {
+                        long seconds = Long.parseLong(secondsBehindMaster);
+                        if (seconds > 100) {
+                            slaveStatus.put("SecondsBehindMasterAlert", "严重告警: 主从延迟超过阈值，当前延迟: " + seconds + " 秒");
+                        }
+                    } catch (NumberFormatException e) {
+                        // 忽略非数字值
+                    }
+                }
+
+                // 检查 GTID 差异
+                String masterGtidSet = slaveStatus.get("Retrieved_Gtid_Set");
+                String slaveGtidSet = slaveStatus.get("Executed_Gtid_Set");
+                if (masterGtidSet != null && slaveGtidSet != null && !masterGtidSet.isEmpty() && !slaveGtidSet.isEmpty()) {
+                    try {
+                        // 计算 GTID 差异（简化逻辑，实际可能需要更复杂的解析）
+                        long masterCount = masterGtidSet.split(",").length;
+                        long slaveCount = slaveGtidSet.split(",").length;
+                        long diff = Math.abs(masterCount - slaveCount);
+
+                        if (diff > 100) {
+                            slaveStatus.put("GtidDiffAlert", "严重告警: GTID 差异超过阈值，当前差值: " + diff);
+                        } else if (diff > 0) {
+                            slaveStatus.put("GtidDiffAlert", "一般告警: GTID 存在差异，当前差值: " + diff);
+                        }
+                    } catch (Exception e) {
+                        // 忽略解析异常
+                    }
+                }
+            }
+        }
+
+        return slaveStatus;
     }
 
     @Tool(name = "insertData", description = "向指定表插入数据")
@@ -589,6 +683,8 @@ public class DatabaseService {
     }
     
     public Map<String, String> findImproperVars() {
+
+
         Map<String, String> results = new HashMap<>();
         
         try (Connection conn = connectionService.getConnection()) {
@@ -851,5 +947,71 @@ public class DatabaseService {
                 results.put("innodb_buffer_pool_size", "警告：innodb_buffer_pool_size参数值(" + (bufferPoolSize / 1024 / 1024) + "MB)较小，建议设置为至少2GB");
             }
         }
+    }
+
+    public Map<String, String> monitorReplicationLag() {
+        Map<String, String> results = new HashMap<>();
+
+        try (Connection conn = connectionService.getConnection()) {
+            // 执行 SHOW SLAVE STATUS 命令
+            Map<String, String> slaveStatus = getSlaveStatus(conn);
+
+            // 检查是否启用了主从复制
+            if (slaveStatus.isEmpty() || 
+                slaveStatus.get("Master_Host") == null || 
+                slaveStatus.get("Master_Log_File") == null || 
+                slaveStatus.get("Exec_Master_Log_Pos") == null || 
+                slaveStatus.get("Retrieved_Gtid_Set") == null || 
+                slaveStatus.get("Executed_Gtid_Set") == null) {
+                results.put("replication_status", "未启用主从复制");
+                return results;
+            }
+
+            // 检查 Slave_IO_Running 和 Slave_SQL_Running 状态
+            if (!"Yes".equals(slaveStatus.get("Slave_IO_Running")) || 
+                !"Yes".equals(slaveStatus.get("Slave_SQL_Running"))) {
+                results.put("replication_error", "严重级告警: Slave IO 或 SQL 线程异常");
+                // 检查错误信息
+                if (slaveStatus.get("Last_IO_Errno") != null || slaveStatus.get("Last_SQL_Errno") != null) {
+                    results.put("io_error", slaveStatus.get("Last_IO_Error"));
+                    results.put("sql_error", slaveStatus.get("Last_SQL_Error"));
+                }
+                return results;
+            }
+
+            // 检查 Seconds_Behind_Master
+            int secondsBehindMaster = Integer.parseInt(slaveStatus.getOrDefault("Seconds_Behind_Master", "0"));
+            if (secondsBehindMaster > 0) {
+                if (secondsBehindMaster > 100) {
+                    results.put("replication_lag", "严重级告警: 复制延迟超过100秒");
+                } else {
+                    results.put("replication_lag", "一般级告警: 复制延迟");
+                }
+            }
+
+            // 检查 Relay_Master_Log_File 和 Master_Log_File
+            if (!slaveStatus.get("Relay_Master_Log_File").equals(slaveStatus.get("Master_Log_File"))) {
+                results.put("replication_lag", "严重级告警: Relay日志落后于Master日志");
+            } else {
+                // 检查 Exec_Master_Log_Pos 和 Read_Master_Log_Pos 差异
+                int execPos = Integer.parseInt(slaveStatus.getOrDefault("Exec_Master_Log_Pos", "0"));
+                int readPos = Integer.parseInt(slaveStatus.getOrDefault("Read_Master_Log_Pos", "0"));
+                if (execPos < readPos) {
+                    results.put("replication_lag", "一般级告警: SQL线程落后于IO线程");
+                }
+            }
+
+            // 检查 GTID 差异
+            String retrievedGtid = slaveStatus.get("Retrieved_Gtid_Set");
+            String executedGtid = slaveStatus.get("Executed_Gtid_Set");
+            if (retrievedGtid != null && executedGtid != null && !retrievedGtid.equals(executedGtid)) {
+                results.put("replication_lag", "一般级告警: GTID执行落后");
+            }
+
+        } catch (Exception e) {
+            results.put("error", "监控主从复制延迟失败: " + e.getMessage());
+        }
+
+        return results;
     }
 }
