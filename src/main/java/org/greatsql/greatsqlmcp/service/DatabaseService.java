@@ -11,7 +11,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +51,7 @@ public class DatabaseService {
         System.out.println("listTables called with database: " + database);
 
         List<TableInfo> tables = new ArrayList<>();
-        String sql = "SELECT table_name,table_schema,table_rows,create_time,table_comment FROM information_schema.tables WHERE table_schema=?";
+        String sql = "SELECT TABLE_NAME, TABLE_SCHEMA, TABLE_ROWS, CREATE_TIME, TABLE_COMMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=?";
 
         try (Connection conn = connectionService.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -181,13 +183,8 @@ public class DatabaseService {
                 // 检查 secondsBehindMaster
                 String secondsBehindMaster = slaveStatus.get("Seconds_Behind_Master");
                 if (secondsBehindMaster != null && !secondsBehindMaster.isEmpty()) {
-                    try {
-                        long seconds = Long.parseLong(secondsBehindMaster);
-                        if (seconds > 100) {
-                            slaveStatus.put("SecondsBehindMasterAlert", "严重告警: 主从延迟超过阈值，当前延迟: " + seconds + " 秒");
-                        }
-                    } catch (NumberFormatException e) {
-                        // 忽略非数字值
+                    if (secondsBehindMaster.matches("\\d+")) {
+                        slaveStatus.put("SecondsBehindMasterAlert", "主从延迟: " + secondsBehindMaster + " 秒");
                     }
                 }
 
@@ -385,7 +382,7 @@ public class DatabaseService {
     @Tool(name = "checkCriticalTransactions", description = "检查当前是否有活跃的大事务或长事务")
     public List<Map<String, Object>> checkCriticalTransactions() {
         List<Map<String, Object>> results = new ArrayList<>();
-        String sql = "SELECT * FROM information_schema.INNODB_TRX WHERE " +
+        String sql = "SELECT * FROM INFORMATION_SCHEMA.INNODB_TRX WHERE " +
                 "trx_lock_structs >= 5 OR " +
                 "trx_rows_locked >= 100 OR " +
                 "trx_rows_modified >= 100 OR " +
@@ -444,21 +441,141 @@ public class DatabaseService {
         }
     }
 
-    @Tool(name = "listNotableWaitEvents", description = "检查需要关注的数据库等待事件")
-    public Map<String, String> listNotableWaitEvents() {
+    @Tool(name = "trackNotableStats", description = "关注需要注意的数据库状态，包括线程危险状态和全局状态指标")
+    public Map<String, String> trackNotableStats() {
         Map<String, String> results = new HashMap<>();
         
+        // 检查线程危险状态
+        try (Connection connection = connectionService.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("SELECT * FROM PERFORMANCE_SCHEMA.PROCESSLIST")) {
+            while (rs.next()) {
+                String state = rs.getString("State");
+                if (state != null && (state.contains("converting HEAP to ondisk")
+                        || state.contains("copy to tmp table")
+                        || state.contains("Copying to group table")
+                        || state.contains("Copying to tmp table")
+                        || state.contains("Copying to tmp table on disk")
+                        || state.contains("Creating sort index")
+                        || state.contains("Creating tmp table")
+                        || state.contains("Rolling back")
+                        || state.contains("Sending data")
+                        || state.contains("Sorting result")
+                        || (state.contains("Waiting for") && !state.contains("Waiting for an event from Coordinator")))) {
+                    results.put("ThreadStateWarning", "严重级潜在性能风险: 线程状态为 " + state);
+                }
+            }
+        } catch (SQLException e) {
+            results.put("ThreadStateError", "检查线程状态失败: " + e.getMessage());
+        }
+        
+        // 检查全局状态指标
+        final String GLOBAL_STATUS_QUERY = "SELECT * FROM PERFORMANCE_SCHEMA.GLOBAL_STATUS";
+        try (Connection connection = connectionService.getConnection();
+             PreparedStatement statement = connection.prepareStatement(GLOBAL_STATUS_QUERY)) {
+            // 第一次查询
+            ResultSet rs = statement.executeQuery();
+            Map<String, Long> firstGlobalStatus = new HashMap<>();
+            while (rs.next()) {
+                String variableName = rs.getString("VARIABLE_NAME");
+                String valueStr = rs.getString("VARIABLE_VALUE");
+                if (valueStr.matches("\\d+")) {
+                    try {
+                        firstGlobalStatus.put(variableName, Long.parseLong(valueStr));
+                    } catch (NumberFormatException e) {
+                        // 如果数值过大，跳过解析
+                        firstGlobalStatus.put(variableName, 0L);
+                    }
+                }
+            }
+
+            // 暂停5秒
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("暂停被中断", e);
+            }
+
+            // 第二次查询
+            rs = statement.executeQuery();
+            Map<String, Long> secondGlobalStatus = new HashMap<>();
+            while (rs.next()) {
+                String variableName = rs.getString("VARIABLE_NAME");
+                String valueStr = rs.getString("VARIABLE_VALUE");
+                if (valueStr.matches("\\d+")) {
+                    try {
+                        secondGlobalStatus.put(variableName, Long.parseLong(valueStr));
+                    } catch (NumberFormatException e) {
+                        // 如果数值过大，跳过解析
+                        secondGlobalStatus.put(variableName, 0L);
+                    }
+                }
+            }
+
+            // 筛选关键指标并检查阈值
+            List<String> keyMetrics = Arrays.asList(
+                "Created_tmp_disk_tables",
+                "Innodb_buffer_pool_wait_free",
+                "Innodb_log_waits",
+                "Innodb_row_lock_current_waits",
+                "Handler_read_rnd",
+                "Handler_read_rnd_next",
+                "Handler_read_first",
+                "Handler_read_key",
+                "Handler_read_last",
+                "Handler_read_next",
+                "Handler_read_prev",
+                "Select_full_join",
+                "Select_scan",
+                "Sort_merge_passes"
+            );
+
+            // 计算Handler_read总和（第一次查询）
+            long firstHandlerReadTotal = firstGlobalStatus.getOrDefault("Handler_read_first", 0L)
+                                    + firstGlobalStatus.getOrDefault("Handler_read_key", 0L)
+                                    + firstGlobalStatus.getOrDefault("Handler_read_last", 0L)
+                                    + firstGlobalStatus.getOrDefault("Handler_read_next", 0L)
+                                    + firstGlobalStatus.getOrDefault("Handler_read_prev", 0L);
+
+            // 计算Handler_read总和（第二次查询）
+            long secondHandlerReadTotal = secondGlobalStatus.getOrDefault("Handler_read_first", 0L)
+                                     + secondGlobalStatus.getOrDefault("Handler_read_key", 0L)
+                                     + secondGlobalStatus.getOrDefault("Handler_read_last", 0L)
+                                     + secondGlobalStatus.getOrDefault("Handler_read_next", 0L)
+                                     + secondGlobalStatus.getOrDefault("Handler_read_prev", 0L);
+
+            // 检查每个关键指标
+            for (String metric : keyMetrics) {
+                long firstValue = firstGlobalStatus.getOrDefault(metric, 0L);
+                long secondValue = secondGlobalStatus.getOrDefault(metric, 0L);
+                long value = secondValue - firstValue;
+                if (metric.equals("Created_tmp_disk_tables") || metric.equals("Innodb_buffer_pool_wait_free") || 
+                    metric.equals("Innodb_log_waits") || metric.equals("Innodb_row_lock_current_waits") ||
+                    metric.equals("Select_full_join") || metric.equals("Select_scan") || metric.equals("Sort_merge_passes")) {
+                    if (value > 20) {
+                        results.put(metric + "_Warning", "严重级潜在性能风险: " + metric + " = " + value);
+                    } else if (value > 5) {
+                        results.put(metric + "_Warning", "一般级潜在性能风险: " + metric + " = " + value);
+                    }
+                } else if (metric.equals("Handler_read_rnd") || metric.equals("Handler_read_rnd_next")) {
+                    long handlerReadRndTotal = secondGlobalStatus.getOrDefault("Handler_read_rnd", 0L)
+                                            + secondGlobalStatus.getOrDefault("Handler_read_rnd_next", 0L);
+                    double ratio = (double) handlerReadRndTotal / secondHandlerReadTotal;
+                    if (ratio > 0.4) {
+                        results.put("HandlerReadRndRatio_Warning", "严重级潜在性能风险: Handler_read_rnd + Handler_read_rnd_next 占比 " + (ratio * 100) + "%");
+                    } else if (ratio > 0.2) {
+                        results.put("HandlerReadRndRatio_Warning", "一般级潜在性能风险: Handler_read_rnd + Handler_read_rnd_next 占比 " + (ratio * 100) + "%");
+                    }
+                }
+            }
+
+        } catch (SQLException e) {
+            results.put("GlobalStatusError", "检查全局状态失败: " + e.getMessage());
+        }
+        
         try (Connection conn = connectionService.getConnection()) {
-            // 1. 检查行锁等待
-            checkRowLockWaits(conn, results);
-            
-            // 2. 检查Buffer Pool等待
-            checkBufferPoolWaits(conn, results);
-            
-            // 3. 检查Redo Log等待
-            checkRedoLogWaits(conn, results);
-            
-            // 4. 检查Undo Log清理
+            // 检查Undo Log清理
             checkUndoLogPurge(conn, results);
             
         } catch (SQLException e) {
@@ -468,56 +585,10 @@ public class DatabaseService {
         return results;
     }
     
-    private void checkRowLockWaits(Connection conn, Map<String, String> results) throws SQLException {
-        String sql = "SELECT variable_value FROM performance_schema.global_status " +
-                     "WHERE variable_name = 'Innodb_row_lock_current_waits'";
-        try (PreparedStatement stmt = conn.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
-            if (rs.next()) {
-                int value = rs.getInt(1);
-                if (value > 10) {
-                    results.put("row_lock_wait", "严重级告警：当前有 " + value + " 个活跃的行锁等待，请DBA立即介入检查");
-                } else if (value > 0) {
-                    results.put("row_lock_wait", "一般级告警：当前有 " + value + " 个活跃的行锁等待，建议DBA检查");
-                }
-            }
-        }
-    }
-    
-    private void checkBufferPoolWaits(Connection conn, Map<String, String> results) throws SQLException {
-        String sql = "SELECT variable_value FROM performance_schema.global_status " +
-                     "WHERE variable_name = 'Innodb_buffer_pool_wait_free'";
-        try (PreparedStatement stmt = conn.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
-            if (rs.next()) {
-                int value = rs.getInt(1);
-                if (value > 10) {
-                    results.put("buffer_pool_wait", "严重级告警：Buffer Pool等待事件 " + value + " 次，请立即调大innodb_buffer_pool_size并检查");
-                } else if (value > 0) {
-                    results.put("buffer_pool_wait", "一般级告警：Buffer Pool等待事件 " + value + " 次，建议调大innodb_buffer_pool_size");
-                }
-            }
-        }
-    }
-    
-    private void checkRedoLogWaits(Connection conn, Map<String, String> results) throws SQLException {
-        String sql = "SELECT variable_value FROM performance_schema.global_status " +
-                     "WHERE variable_name = 'Innodb_log_waits'";
-        try (PreparedStatement stmt = conn.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
-            if (rs.next()) {
-                int value = rs.getInt(1);
-                if (value > 10) {
-                    results.put("redo_log_wait", "严重级告警：Redo Log等待事件 " + value + " 次，请立即调大innodb_log_buffer_size并检查");
-                } else if (value > 0) {
-                    results.put("redo_log_wait", "一般级告警：Redo Log等待事件 " + value + " 次，建议调大innodb_log_buffer_size");
-                }
-            }
-        }
-    }
+
     
     private void checkUndoLogPurge(Connection conn, Map<String, String> results) throws SQLException {
-        String sql = "SELECT COUNT, COMMENT FROM information_schema.INNODB_METRICS " +
+        String sql = "SELECT COUNT, COMMENT FROM INFORMATION_SCHEMA.INNODB_METRICS " +
                      "WHERE NAME = 'trx_rseg_history_len'";
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
@@ -551,7 +622,7 @@ public class DatabaseService {
     }
     
     private void checkMGREnabled(Connection conn, Map<String, String> results) throws SQLException {
-        String sql = "SELECT * FROM performance_schema.replication_group_members";
+        String sql = "SELECT * FROM PERFORMANCE_SCHEMA.REPLICATION_GROUP_MEMBERS";
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
             if (!rs.next()) {
@@ -560,14 +631,18 @@ public class DatabaseService {
             }
             
             boolean hasOnlineMember = false;
+            int rowCount = 1;
             do {
                 if ("ONLINE".equals(rs.getString("MEMBER_STATE"))) {
                     hasOnlineMember = true;
                     break;
                 }
+                rowCount++;
             } while (rs.next());
             
-            if (!hasOnlineMember) {
+            if (!hasOnlineMember && rowCount == 1 && "OFFLINE".equals(rs.getString("MEMBER_STATE"))) {
+                results.put("mgr_status", "提示：已启用group_replication plugin，是否要继续构建MGR服务");
+            } else if (!hasOnlineMember) {
                 results.put("mgr_status", "严重级告警：MGR已启用但无ONLINE状态的成员");
             } else {
                 results.put("mgr_status", "MGR运行正常");
@@ -576,25 +651,30 @@ public class DatabaseService {
     }
     
     private void checkMGRTransactionQueue(Connection conn, Map<String, String> results) throws SQLException {
-        String sql = "SELECT MEMBER_ID as id, COUNT_TRANSACTIONS_IN_QUEUE as trx_tobe_certified, " +
-                     "COUNT_TRANSACTIONS_REMOTE_IN_APPLIER_QUEUE as relaylog_tobe_applied " +
-                     "FROM performance_schema.replication_group_member_stats";
+        String sql = "SELECT s.MEMBER_ID as id, s.COUNT_TRANSACTIONS_IN_QUEUE as trx_tobe_certified, " +
+                     "s.COUNT_TRANSACTIONS_REMOTE_IN_APPLIER_QUEUE as relaylog_tobe_applied, " +
+                     "m.MEMBER_HOST as host, m.MEMBER_PORT as port " +
+                     "FROM PERFORMANCE_SCHEMA.REPLICATION_GROUP_MEMBER_STATS s " +
+                     "JOIN PERFORMANCE_SCHEMA.REPLICATION_GROUP_MEMBERS m ON s.MEMBER_ID = m.MEMBER_ID";
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
-            if (rs.next()) {
+            while (rs.next()) {
+                String memberId = rs.getString("id");
+                String host = rs.getString("host");
+                int port = rs.getInt("port");
                 int trxToCertify = rs.getInt("trx_tobe_certified");
                 int relaylogToApply = rs.getInt("relaylog_tobe_applied");
                 
                 if (trxToCertify > 100) {
-                    results.put("mgr_trx_certify", "严重级告警：待认证事务队列大小 " + trxToCertify);
+                    results.put("mgr_trx_certify_" + memberId, "严重级告警：节点 " + host + ":" + port + " (ID: " + memberId + ") 待认证事务队列大小 " + trxToCertify);
                 } else if (trxToCertify > 10) {
-                    results.put("mgr_trx_certify", "一般级关注：待认证事务队列大小 " + trxToCertify);
+                    results.put("mgr_trx_certify_" + memberId, "一般级关注：节点 " + host + ":" + port + " (ID: " + memberId + ") 待认证事务队列大小 " + trxToCertify);
                 }
                 
                 if (relaylogToApply > 100) {
-                    results.put("mgr_relaylog_apply", "严重级告警：待回放事务队列大小 " + relaylogToApply);
+                    results.put("mgr_relaylog_apply", "严重级告警：节点 " + host + ":" + port + " (ID: " + memberId + ") 待回放事务队列大小 " + relaylogToApply);
                 } else if (relaylogToApply > 10) {
-                    results.put("mgr_relaylog_apply", "一般级关注：待回放事务队列大小 " + relaylogToApply);
+                    results.put("mgr_relaylog_apply", "一般级关注：节点 " + host + ":" + port + " (ID: " + memberId + ") 待回放事务队列大小 " + relaylogToApply);
                 }
             }
         }
@@ -645,11 +725,11 @@ public class DatabaseService {
     }
     
     private long getInnoDBBufferPoolSize(Connection conn) throws SQLException {
-        String sql = "SHOW VARIABLES LIKE 'innodb_buffer_pool_size'";
+        String sql = "SELECT * FROM PERFORMANCE_SCHEMA.GLOBAL_VARIABLES WHERE VARIABLE_NAME='innodb_buffer_pool_size'";
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
             if (rs.next()) {
-                return rs.getLong("Value");
+                return rs.getLong("VARIABLE_VALUE");
             }
         }
         return 0;
@@ -746,7 +826,7 @@ public class DatabaseService {
     
     private Map<String, String> getGlobalVariables(Connection conn) throws SQLException {
         Map<String, String> vars = new HashMap<>();
-        String sql = "SELECT * FROM performance_schema.global_variables";
+        String sql = "SELECT * FROM PERFORMANCE_SCHEMA.GLOBAL_VARIABLES";
         
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
@@ -759,7 +839,7 @@ public class DatabaseService {
     
     private Map<String, String> getGlobalStatus(Connection conn) throws SQLException {
         Map<String, String> stats = new HashMap<>();
-        String sql = "SELECT * FROM performance_schema.global_status";
+        String sql = "SELECT * FROM PERFORMANCE_SCHEMA.GLOBAL_STATUS";
         
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
@@ -953,7 +1033,6 @@ public class DatabaseService {
         Map<String, String> results = new HashMap<>();
 
         try (Connection conn = connectionService.getConnection()) {
-            // 执行 SHOW SLAVE STATUS 命令
             Map<String, String> slaveStatus = getSlaveStatus(conn);
 
             // 检查是否启用了主从复制

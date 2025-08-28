@@ -283,8 +283,8 @@ public class McpController {
                                 )
                         ),
                         Map.of(
-                                "name", "listNotableWaitEvents",
-                                "description", "检查需要关注的数据库等待事件",
+                                "name", "trackNotableStats",
+                                "description", "关注需要注意的数据库状态，包括线程危险状态和全局状态指标",
                                 "inputSchema", Map.of(
                                         "type", "object",
                                         "properties", Map.of(),
@@ -411,8 +411,8 @@ public class McpController {
             case "checkCriticalTransactions" -> {
                 yield databaseService.checkCriticalTransactions();
             }
-            case "listNotableWaitEvents" -> {
-                yield databaseService.listNotableWaitEvents();
+            case "trackNotableStats" -> {
+                yield databaseService.trackNotableStats();
             }
             case "checkMGRStatus" -> {
                 yield databaseService.checkMGRStatus();
