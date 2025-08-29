@@ -81,7 +81,7 @@ greatsql> GRANT ALL ON mcp.* TO mcp;
 java -version
 ```
 
-显示类似如下内容即安装成功：  
+显示类似如下内容即安装成功：
 
 ```
 java version "21.0.1" 2023-10-17
@@ -113,7 +113,7 @@ java version "21.0.8" 2025-07-15 LTS
 ...
 ```
 
-#### 2.2、安装Maven 3.6+ 
+#### 2.2、安装Maven 3.6+
 
 打以Windows客户端环境为例，开 [Maven 官方下载链接](https://maven.apache.org/download.cgi) 下载Maven安装包。
 
@@ -256,15 +256,15 @@ HTTP Header处填写 *api-key* 参数，如：`Authorization=Bearer 7355608`。
 
 截止目前，支持以下这些MCP服务
 
-| 工具名称 | 说明 | 
-| :--- | :--- | 
+| 工具名称 | 说明 |
+| :--- | :--- |
 | listDatabases | 列出服务器上所有可用的数据库 |
 | listTables | 列出指定数据库中的所有表 |
 | getTableRowCount | 获取指定表的数据行数 |
 | executeQuery | 在指定数据库中执行SQL查询 |
 | insertData | 向指定表插入数据 |
 | updateData | 更新指定表的数据 |
-| deleteData | 删除指定表的数据 |   
+| deleteData | 删除指定表的数据 |
 | createDB | 创建数据库 |
 | checkCriticalTransactions | 检查当前是否有活跃的大事务或长事务" |
 | avgSQLRT | 计算SQL请求平均响应耗时 |
@@ -278,49 +278,49 @@ HTTP Header处填写 *api-key* 参数，如：`Authorization=Bearer 7355608`。
 
 #### 列出服务器上所有可用的数据库
 
-提示词：`列出所有的数据库`
+**提示词**：`列出所有的数据库`
 
 ![使用示例：列出服务器上所有可用的数据库](./docs/images/使用示例1.png)
 
 #### 列出指定数据库中的所有表
 
-提示词：`列出greatsql里所有的表`
+**提示词**：`列出greatsql里所有的表`
 
 ![使用示例：列出指定数据库中的所有表](./docs/images/使用示例2.png)
 
 #### 获取指定表的数据行数
 
-提示词：`users表中有多少行`
+**提示词**：`users表中有多少行`
 
 ![使用示例：获取指定表的数据行数](./docs/images/使用示例3.png)
 
 #### 在指定数据库中执行SQL查询
 
-提示词：`查询users表中年龄大于30的人`
+**提示词**：`查询users表中年龄大于30的人`
 
 ![使用示例：在指定数据库中执行SQL查询](./docs/images/使用示例4.png)
 
 #### 向指定表插入数据
 
-提示词：`向greatsql里的users表中插入一行数据 名字为lucy 年龄为18`
+**提示词**：`向greatsql里的users表中插入一行数据 名字为lucy 年龄为18`
 
 ![使用示例：向指定表插入数据](./docs/images/使用示例5.png)
 
 #### 更新指定表的数据
 
-提示词：`把lucy的年龄改为20`
+**提示词**：`把lucy的年龄改为20`
 
 ![使用示例：更新指定表的数据](./docs/images/使用示例6.png)
 
 #### 删除指定表的数据
 
-提示词：`删除lucy的数据`
+**提示词**：`删除lucy的数据`
 
 ![使用示例：删除指定表的数据](./docs/images/使用示例7.png)
 
 #### 创建指定数据库
 
-提示词：`请创建一个名为test的新数据库`
+**提示词**：`请创建一个名为test的新数据库`
 
 ![使用示例：创建指定数据库](./docs/images/使用示例8.png)
 
@@ -328,51 +328,55 @@ HTTP Header处填写 *api-key* 参数，如：`Authorization=Bearer 7355608`。
 
 #### 检查大事务或长事务
 
-提示词：`检查大事务或长事务`
+**提示词**：`检查大事务或长事务`
 
 ![使用示例：检查大事务或长事务](./docs/images/使用示例9.png)
 
 #### 计算SQL请求平均响应耗时
 
-提示词：`帮忙检查SQL平均响应耗时`
+**提示词**：`帮忙检查SQL平均响应耗时`
 
 ![使用示例：计算SQL请求平均响应耗时](./docs/images/使用示例10.png)
 
 #### 检查数据库状态，包括线程危险状态和全局状态指标
 
-提示词：`检查数据库状态`
+**提示词**：`检查数据库状态`
 
 ![使用示例：检查数据库状态](./docs/images/使用示例11.png)
 
 #### 监控MGR集群状态
 
-提示词：`监控MGR状态`
+**提示词**：`监控MGR状态`
 
 这是MGR状态正常时
+
 ![使用示例：监控MGR集群状态，正常时](./docs/images/使用示例12.png)
 
 这是有个成员节点上待应用的事务队列超过阈值时
+
 ![使用示例：监控MGR集群状态，异常时](./docs/images/使用示例13.png)
 
 #### 检查数据库中是否存在内存异常情况
 
-提示词：`检查数据库内存`
+**提示词**：`检查数据库内存`
 
 有时候好像会抽风，没办法一次命中对应的MCP指令，可以多试几次
+
 ![使用示例：检查数据库中是否存在内存异常情况](./docs/images/使用示例14.png)
 
 也可以直接“指名道姓”地要求执行相应的MCP指令
+
 ![使用示例：检查数据库中是否存在内存异常情况](./docs/images/使用示例15.png)
 
 #### 检查不当配置参数
 
-提示词：`检查系统参数`
+**提示词**：`检查系统参数`
 
 ![使用示例: 检查不当配置参数](./docs/images/使用示例16.png)
 
 #### 监控主从复制延迟
 
-提示词：`监控主从复制延迟`
+**提示词**：`监控主从复制延迟`
 
 ![使用示例：监控主从复制延迟](./docs/images/使用示例17.png)
 
@@ -448,7 +452,7 @@ index ea20c48..c89a38e 100644
                                  "name", "listTables",
                                  "description", "列出指定数据库中的所有表",
 @@ -263,6 +277,15 @@ public class McpController {
- 
+
          Object result = switch (name) {
              case "listDatabases" -> databaseService.listDatabases();
 +
@@ -482,7 +486,7 @@ index ea20c48..c89a38e 100644
 @@ -327,4 +352,4 @@ public class McpController {
          );
      }
- 
+
 -}
 \ No newline at end of file
 +}
@@ -493,7 +497,7 @@ index 0e212be..0bab7be 100644
 @@ -41,6 +41,20 @@ public class DatabaseService {
          return databases;
      }
- 
+
 +    @Tool(name = "createDB", description = "创建一个新数据库")
 +    public int createDB( @ToolParam(description = "数据库名称") String database) {
 +
@@ -508,13 +512,13 @@ index 0e212be..0bab7be 100644
 +        }
 +	return 0;
 +    }
- 
+
      @Tool(name = "listTables", description = "列出指定数据库中的所有表")
      public List<TableInfo> listTables(
 @@ -273,4 +287,4 @@ public class DatabaseService {
          }
      }
- 
+
 -}
 \ No newline at end of file
 +}
