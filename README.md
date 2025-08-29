@@ -162,7 +162,7 @@ $ git clone https://gitee.com/GreatSQL/greatsql-mcp-server.git
 
 ### 2、配置数据库连接
 
-修改 `src/main/resources/application.properties` 文件：
+修改 `config/greatsql-mcp-server.conf` 文件：
 
 ```ini
 greatsql.url=jdbc:mysql://127.0.0.1:3306
@@ -208,7 +208,7 @@ chatbox安装：
 
 #### 4.2、远程接入
 
-编辑文件 `src/main/resources/application.properties`，修改MCP Server相关配置
+编辑文件 `config/greatsql-mcp-server.conf`，修改MCP Server相关配置
 
 ```
 # 服务端口配置
@@ -231,7 +231,7 @@ $ java -jar greatsql-mcp-server-0.0.1-SNAPSHOT.jar
 2025-07-30 10:37:36 [main] INFO  o.s.a.m.s.a.McpServerAutoConfiguration - Registered tools: 7, notification: true
 2025-07-30 10:37:36 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
 2025-07-30 10:37:36 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
-2025-07-30 10:37:36 [main] INFO  o.g.g.GreatSqlMcpApplication - Started GreatSqlMcpApplication in 1.122 seconds (process running for 1.457)
+2025-07-30 10:37:36 [main] INFO  o.g.g.GreatSQLMCPApplication - Started GreatSQLMCPApplication in 1.122 seconds (process running for 1.457)
 ```
 
 根据上面配置, MCP对应的服务地址和认证信息如下，用于在chatbox的MCP Server配置框进行填写。
