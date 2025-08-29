@@ -283,8 +283,8 @@ public class McpController {
                                 )
                         ),
                         Map.of(
-                                "name", "listNotableWaitEvents",
-                                "description", "检查需要关注的数据库等待事件",
+                                "name", "trackNotableStats",
+                                "description", "关注需要注意的数据库状态，包括线程危险状态和全局状态指标",
                                 "inputSchema", Map.of(
                                         "type", "object",
                                         "properties", Map.of(),
@@ -303,6 +303,24 @@ public class McpController {
                         Map.of(
                                 "name", "findAbnormalMemoryIssue",
                                 "description", "检查数据库中是否存在内存异常情况",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
+                        ),
+                        Map.of(
+                                "name", "findImproperVars",
+                                "description", "检查数据库系统参数配置是否合理",
+                                "inputSchema", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(),
+                                        "required", new String[]{}
+                                )
+                        ),
+                        Map.of(
+                                "name", "monitorReplicationLag",
+                                "description", "监控主从复制延迟",
                                 "inputSchema", Map.of(
                                         "type", "object",
                                         "properties", Map.of(),
@@ -389,17 +407,21 @@ public class McpController {
                 }
                 yield databaseService.createDB(databaseName);
             }
+            case "monitorReplicationLag" -> databaseService.monitorReplicationLag();
             case "checkCriticalTransactions" -> {
                 yield databaseService.checkCriticalTransactions();
             }
-            case "listNotableWaitEvents" -> {
-                yield databaseService.listNotableWaitEvents();
+            case "trackNotableStats" -> {
+                yield databaseService.trackNotableStats();
             }
             case "checkMGRStatus" -> {
                 yield databaseService.checkMGRStatus();
             }
             case "findAbnormalMemoryIssue" -> {
                 yield databaseService.findAbnormalMemoryIssue();
+            }
+            case "findImproperVars" -> {
+                yield databaseService.findImproperVars();
             }
             default -> Map.of("error", "未知的工具: " + name);
         };
