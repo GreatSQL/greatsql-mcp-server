@@ -448,7 +448,7 @@ public class DatabaseService {
         // 检查线程危险状态
         try (Connection connection = connectionService.getConnection();
              Statement statement = connection.createStatement();
-             ResultSet rs = statement.executeQuery("SELECT * FROM PERFORMANCE_SCHEMA.PROCESSLIST")) {
+             ResultSet rs = statement.executeQuery("SELECT * FROM performance_schema.processlist")) {
             while (rs.next()) {
                 String state = rs.getString("State");
                 if (state != null && (state.contains("converting HEAP to ondisk")
@@ -470,9 +470,9 @@ public class DatabaseService {
         }
         
         // 检查全局状态指标
-        final String GLOBAL_STATUS_QUERY = "SELECT * FROM PERFORMANCE_SCHEMA.GLOBAL_STATUS";
+        final String global_status_QUERY = "SELECT * FROM performance_schema.global_status";
         try (Connection connection = connectionService.getConnection();
-             PreparedStatement statement = connection.prepareStatement(GLOBAL_STATUS_QUERY)) {
+             PreparedStatement statement = connection.prepareStatement(global_status_QUERY)) {
             // 第一次查询
             ResultSet rs = statement.executeQuery();
             Map<String, Long> firstGlobalStatus = new HashMap<>();
@@ -622,7 +622,7 @@ public class DatabaseService {
     }
     
     private void checkMGREnabled(Connection conn, Map<String, String> results) throws SQLException {
-        String sql = "SELECT * FROM PERFORMANCE_SCHEMA.REPLICATION_GROUP_MEMBERS";
+        String sql = "SELECT * FROM performance_schema.replication_group_members";
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
             if (!rs.next()) {
@@ -654,8 +654,8 @@ public class DatabaseService {
         String sql = "SELECT s.MEMBER_ID as id, s.COUNT_TRANSACTIONS_IN_QUEUE as trx_tobe_certified, " +
                      "s.COUNT_TRANSACTIONS_REMOTE_IN_APPLIER_QUEUE as relaylog_tobe_applied, " +
                      "m.MEMBER_HOST as host, m.MEMBER_PORT as port " +
-                     "FROM PERFORMANCE_SCHEMA.REPLICATION_GROUP_MEMBER_STATS s " +
-                     "JOIN PERFORMANCE_SCHEMA.REPLICATION_GROUP_MEMBERS m ON s.MEMBER_ID = m.MEMBER_ID";
+                     "FROM performance_schema.replication_group_member_stats s " +
+                     "JOIN performance_schema.replication_group_members m ON s.MEMBER_ID = m.MEMBER_ID";
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
             while (rs.next()) {
@@ -700,7 +700,7 @@ public class DatabaseService {
     
     private void checkGlobalMemoryEvents(Connection conn, Map<String, String> results) throws SQLException {
         String sql = "SELECT EVENT_NAME, SUM_NUMBER_OF_BYTES_ALLOC FROM " +
-                     "PERFORMANCE_SCHEMA.MEMORY_SUMMARY_GLOBAL_BY_EVENT_NAME " +
+                     "performance_schema.memory_summary_global_by_event_name " +
                      "WHERE SUM_NUMBER_OF_BYTES_ALLOC >= 1073741824 " +
                      "ORDER BY SUM_NUMBER_OF_BYTES_ALLOC DESC";
         
@@ -725,7 +725,7 @@ public class DatabaseService {
     }
     
     private long getInnoDBBufferPoolSize(Connection conn) throws SQLException {
-        String sql = "SELECT * FROM PERFORMANCE_SCHEMA.GLOBAL_VARIABLES WHERE VARIABLE_NAME='innodb_buffer_pool_size'";
+        String sql = "SELECT * FROM performance_schema.global_variables WHERE VARIABLE_NAME='innodb_buffer_pool_size'";
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
             if (rs.next()) {
@@ -737,7 +737,7 @@ public class DatabaseService {
     
     private void checkThreadMemoryEvents(Connection conn, Map<String, String> results) throws SQLException {
         String sql = "SELECT THREAD_ID, EVENT_NAME, SUM_NUMBER_OF_BYTES_ALLOC FROM " +
-                     "PERFORMANCE_SCHEMA.MEMORY_SUMMARY_BY_THREAD_BY_EVENT_NAME " +
+                     "performance_schema.memory_summary_by_thread_by_event_name " +
                      "WHERE SUM_NUMBER_OF_BYTES_ALLOC >= 1073741824 " +
                      "ORDER BY SUM_NUMBER_OF_BYTES_ALLOC DESC";
         
@@ -826,7 +826,7 @@ public class DatabaseService {
     
     private Map<String, String> getGlobalVariables(Connection conn) throws SQLException {
         Map<String, String> vars = new HashMap<>();
-        String sql = "SELECT * FROM PERFORMANCE_SCHEMA.GLOBAL_VARIABLES";
+        String sql = "SELECT * FROM performance_schema.global_variables";
         
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
@@ -839,7 +839,7 @@ public class DatabaseService {
     
     private Map<String, String> getGlobalStatus(Connection conn) throws SQLException {
         Map<String, String> stats = new HashMap<>();
-        String sql = "SELECT * FROM PERFORMANCE_SCHEMA.GLOBAL_STATUS";
+        String sql = "SELECT * FROM performance_schema.global_status";
         
         try (PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
